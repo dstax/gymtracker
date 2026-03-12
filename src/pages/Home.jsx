@@ -46,13 +46,7 @@ export default function Home({ session }) {
 
         {page === 'workouts' && <Workouts session={session} />}
 
-        {page === 'calendar' && (
-          <div className="pt-8">
-            <div className="text-[#e8ff47] text-3xl font-black tracking-wide">CALENDARIO</div>
-            <p className="text-[#999] text-sm mt-4">Nessuna sessione programmata.</p>
-          </div>
-        )}
-{page === 'stats' && <Stats session={session} />}
+        {page === 'history' && <History session={session} />}
 
         {page === 'profile' && (
           <Profile
@@ -66,10 +60,9 @@ export default function Home({ session }) {
       <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-[#111] border-t border-[#2a2a2a] flex py-2">
         {[
           { id: 'home', icon: '🏠', label: 'Home' },
-{ id: 'workouts', icon: '📋', label: 'Schede' },
-{ id: 'stats', icon: '📈', label: 'Stats' },
-{ id: 'history', icon: '📊', label: 'Storico' },
-{ id: 'profile', icon: '👤', label: 'Profilo' },
+          { id: 'workouts', icon: '📋', label: 'Schede' },
+          { id: 'history', icon: '📊', label: 'Storico' },
+          { id: 'profile', icon: '👤', label: 'Profilo' },
         ].map(item => (
           <button
             key={item.id}
