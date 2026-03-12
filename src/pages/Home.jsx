@@ -45,7 +45,6 @@ export default function Home({ session }) {
         )}
 
         {page === 'workouts' && <Workouts session={session} />}
-
         {page === 'history' && <History session={session} />}
 
         {page === 'profile' && (
