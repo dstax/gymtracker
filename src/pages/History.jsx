@@ -12,16 +12,23 @@ export default function History({ session }) {
     fetchSessions()
   }, [])
 
-async function fetchSessions() {
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('*')
-    .eq('user_id', session.user.id)
-    .order('ended_at', { ascending: false })
-  console.log('Sessioni:', data, 'Errore:', error)
-  if (data) setSessions(data)
-  setLoading(false)
-}
+  async function fetchSessions() {
+    const { data } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('ended_at', { ascending: false })
+    if (data) setSessions(data)
+    setLoading(false)
+  }
+
+  async function deleteSession(id) {
+    if (!confirm('Eliminare questa sessione?')) return
+    await supabase.from('session_sets').delete().eq('session_id', id)
+    await supabase.from('sessions').delete().eq('id', id)
+    setSelected(null)
+    fetchSessions()
+  }
 
   async function openDetail(sess) {
     setSelected(sess)
@@ -62,7 +69,15 @@ async function fetchSessions() {
 
   if (selected) return (
     <div className="pt-6">
-      <button onClick={() => setSelected(null)} className="text-[#666] text-sm mb-4 flex items-center gap-1">← Cronologia</button>
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={() => setSelected(null)} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
+        <button
+          onClick={() => deleteSession(selected.id)}
+          className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
+        >
+          🗑
+        </button>
+      </div>
       <div className="text-[#e8ff47] text-3xl font-black tracking-wide">{selected.workout_name?.toUpperCase()}</div>
       <div className="text-[#666] text-xs mt-1 capitalize">{formatDate(selected.ended_at)}</div>
       <div className="grid grid-cols-3 gap-3 mt-4">
@@ -117,15 +132,22 @@ async function fetchSessions() {
         {sessions.map(s => (
           <div
             key={s.id}
-            onClick={() => openDetail(s)}
-            className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl cursor-pointer active:scale-[.98] transition-transform"
+            className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl cursor-pointer active:scale-[.98] transition-transform relative"
           >
-            <div className="text-[#666] text-xs uppercase tracking-widest capitalize">{formatDate(s.ended_at)}</div>
-            <div className="text-white font-black text-lg mt-1">{s.workout_name}</div>
-            <div className="flex gap-4 mt-2">
-              <div className="text-[#666] text-xs">Durata: <span className="text-white font-medium">{fmt(s.duration_seconds)}</span></div>
-              <div className="text-[#666] text-xs">Volume: <span className="text-white font-medium">{(s.total_volume / 1000).toFixed(1)}t</span></div>
+            <div onClick={() => openDetail(s)}>
+              <div className="text-[#666] text-xs uppercase tracking-widest capitalize">{formatDate(s.ended_at)}</div>
+              <div className="text-white font-black text-lg mt-1">{s.workout_name}</div>
+              <div className="flex gap-4 mt-2">
+                <div className="text-[#666] text-xs">Durata: <span className="text-white font-medium">{fmt(s.duration_seconds)}</span></div>
+                <div className="text-[#666] text-xs">Volume: <span className="text-white font-medium">{(s.total_volume / 1000).toFixed(1)}t</span></div>
+              </div>
             </div>
+            <button
+              onClick={e => { e.stopPropagation(); deleteSession(s.id) }}
+              className="absolute top-4 right-4 w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
+            >
+              🗑
+            </button>
           </div>
         ))}
       </div>
