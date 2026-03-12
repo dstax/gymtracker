@@ -27,29 +27,29 @@ export default function Home({ session }) {
 
       <div className="flex-1 overflow-y-auto pb-24 px-5">
 
-{page === 'home' && (
-  <div className="pt-8">
-    <div className="flex flex-col items-center mb-2">
-      <img src="/logo_gymtracker_TRASP.png" alt="GymTracker" className="w-48 h-48 object-contain" />
-    </div>
-    <div className="text-[#666] text-xs tracking-widest uppercase">Bentornato/a</div>
-    <div className="text-[#e8ff47] text-5xl font-black tracking-wide mt-1">
-      {name.toUpperCase()}
-    </div>
-    <p className="text-[#444] text-sm italic mt-2">"La costanza batte il talento."</p>
-    <div className="mt-6 p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
-      <p className="text-[#666] text-xs uppercase tracking-widest">Nessun allenamento programmato</p>
-      <p className="text-white text-sm mt-1">Crea la tua prima scheda dalla sezione Schede!</p>
-    </div>
-  </div>
-)}
+        {page === 'home' && (
+          <div className="pt-8">
+            <div className="flex flex-col items-center mb-2">
+              <img src="/logo_gymtracker_TRASP.png" alt="GymTracker" className="w-48 h-48 object-contain" />
+            </div>
+            <div className="text-[#999] text-xs tracking-widest uppercase">Bentornato/a</div>
+            <div className="text-[#e8ff47] text-5xl font-black tracking-wide mt-1">
+              {name.toUpperCase()}
+            </div>
+            <p className="text-[#888] text-sm italic mt-2">"La costanza batte il talento."</p>
+            <div className="mt-6 p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+              <p className="text-[#999] text-xs uppercase tracking-widest">Nessun allenamento programmato</p>
+              <p className="text-white text-sm mt-1">Crea la tua prima scheda dalla sezione Schede!</p>
+            </div>
+          </div>
+        )}
 
         {page === 'workouts' && <Workouts session={session} />}
 
         {page === 'calendar' && (
           <div className="pt-8">
             <div className="text-[#e8ff47] text-3xl font-black tracking-wide">CALENDARIO</div>
-            <p className="text-[#666] text-sm mt-4">Nessuna sessione programmata.</p>
+            <p className="text-[#999] text-sm mt-4">Nessuna sessione programmata.</p>
           </div>
         )}
 
@@ -88,3 +88,4 @@ export default function Home({ session }) {
     </div>
   )
 }
+```
