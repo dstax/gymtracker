@@ -75,6 +75,11 @@ export default function Profile({ session, onProfileUpdate }) {
     setTimeout(() => setMessage(''), 3000)
   }
 
+  async function deleteWeightEntry(id) {
+    await supabase.from('weight_history').delete().eq('id', id)
+    getWeightHistory()
+  }
+
   async function handleLogout() {
     await supabase.auth.signOut()
   }
@@ -183,13 +188,19 @@ export default function Profile({ session, onProfileUpdate }) {
             {weightHistory.map((w, i) => (
               <div key={w.id} className="flex items-center justify-between p-3 bg-[#111] border border-[#2a2a2a] rounded-xl">
                 <span className="text-[#666] text-xs">{formatDate(w.recorded_at)}</span>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                   <span className="text-[#e8ff47] font-mono font-bold">{w.weight} kg</span>
                   {i < weightHistory.length - 1 && (
                     <span className={`text-xs ${w.weight < weightHistory[i + 1].weight ? 'text-green-400' : w.weight > weightHistory[i + 1].weight ? 'text-red-400' : 'text-[#666]'}`}>
                       {w.weight < weightHistory[i + 1].weight ? '↓' : w.weight > weightHistory[i + 1].weight ? '↑' : '—'}
                     </span>
                   )}
+                  <button
+                    onClick={() => deleteWeightEntry(w.id)}
+                    className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
             ))}
