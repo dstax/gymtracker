@@ -29,10 +29,10 @@ export default function Home({ session }) {
 
 {page === 'home' && (
   <div className="pt-8">
-    <div className="flex flex-col items-center mb-6">
+    <div className="flex flex-col items-center mb-2">
       <img src="/logo_gymtracker_TRASP.png" alt="GymTracker" className="w-48 h-48 object-contain" />
     </div>
-    <div className="text-[#666] text-xs tracking-widest uppercase">Bentornato</div>
+    <div className="text-[#666] text-xs tracking-widest uppercase">Bentornato/a</div>
     <div className="text-[#e8ff47] text-5xl font-black tracking-wide mt-1">
       {name.toUpperCase()}
     </div>
@@ -43,7 +43,6 @@ export default function Home({ session }) {
     </div>
   </div>
 )}
-```
 
         {page === 'workouts' && <Workouts session={session} />}
 
