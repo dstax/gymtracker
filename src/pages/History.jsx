@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import Stats from './Stats'
 
 export default function History({ session }) {
   const [sessions, setSessions] = useState([])
@@ -7,6 +8,7 @@ export default function History({ session }) {
   const [selected, setSelected] = useState(null)
   const [detail, setDetail] = useState([])
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [showStats, setShowStats] = useState(false)
 
   useEffect(() => {
     fetchSessions()
@@ -67,6 +69,13 @@ export default function History({ session }) {
 
   if (loading) return <div className="pt-8 text-[#666] text-sm">Caricamento...</div>
 
+  if (showStats) return (
+    <div className="pt-6">
+      <button onClick={() => setShowStats(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Cronologia</button>
+      <Stats session={session} />
+    </div>
+  )
+
   if (selected) return (
     <div className="pt-6">
       <div className="flex items-center justify-between mb-4">
@@ -120,8 +129,18 @@ export default function History({ session }) {
 
   return (
     <div className="pt-8">
-      <div className="text-[#e8ff47] text-3xl font-black tracking-wide">CRONOLOGIA</div>
-      <div className="text-[#666] text-xs uppercase tracking-widest mt-1">{sessions.length} sessioni completate</div>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[#e8ff47] text-3xl font-black tracking-wide">CRONOLOGIA</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">{sessions.length} sessioni completate</div>
+        </div>
+        <button
+          onClick={() => setShowStats(true)}
+          className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl flex items-center justify-center"
+        >
+          📈
+        </button>
+      </div>
       <div className="mt-4 space-y-3">
         {sessions.length === 0 && (
           <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
