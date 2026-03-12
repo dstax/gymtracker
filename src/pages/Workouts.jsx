@@ -2,14 +2,23 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import WorkoutDetail from './WorkoutDetail'
 
+const DAYS = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab']
+
 export default function Workouts({ session }) {
   const [workouts, setWorkouts] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [selectedWorkout, setSelectedWorkout] = useState(null)
+  const [schedulingWorkout, setSchedulingWorkout] = useState(null)
   const [newName, setNewName] = useState('')
   const [newMuscles, setNewMuscles] = useState('')
   const [saving, setSaving] = useState(false)
+  const [scheduleType, setScheduleType] = useState('single')
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [recurringDays, setRecurringDays] = useState([])
+  const [savingSchedule, setSavingSchedule] = useState(false)
+  const [justCreated, setJustCreated] = useState(null)
 
   useEffect(() => {
     fetchWorkouts()
@@ -28,19 +37,72 @@ export default function Workouts({ session }) {
   async function createWorkout() {
     if (!newName.trim()) return
     setSaving(true)
-    const { error } = await supabase.from('workouts').insert({
+    const { data, error } = await supabase.from('workouts').insert({
       user_id: session.user.id,
       name: newName.trim(),
       target_muscles: newMuscles.trim(),
       position: workouts.length
-    })
-    if (!error) {
+    }).select().single()
+    if (!error && data) {
       setNewName('')
       setNewMuscles('')
       setShowModal(false)
       fetchWorkouts()
+      setJustCreated(data)
+      setSchedulingWorkout(data)
+      setShowScheduleModal(true)
     }
     setSaving(false)
+  }
+
+  async function saveSchedule() {
+    if (!schedulingWorkout) return
+    setSavingSchedule(true)
+
+    if (scheduleType === 'single') {
+      if (!scheduleDate) { setSavingSchedule(false); return }
+      await supabase.from('scheduled_workouts').insert({
+        user_id: session.user.id,
+        workout_id: schedulingWorkout.id,
+        scheduled_date: scheduleDate,
+        is_recurring: false
+      })
+    } else {
+      if (recurringDays.length === 0) { setSavingSchedule(false); return }
+      await supabase.from('scheduled_workouts').insert({
+        user_id: session.user.id,
+        workout_id: schedulingWorkout.id,
+        scheduled_date: getNextOccurrence(recurringDays),
+        is_recurring: true,
+        recurring_days: recurringDays
+      })
+    }
+
+    setSavingSchedule(false)
+    setShowScheduleModal(false)
+    setSchedulingWorkout(null)
+    setScheduleDate('')
+    setRecurringDays([])
+    setScheduleType('single')
+  }
+
+  function getNextOccurrence(days) {
+    const today = new Date()
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today)
+      d.setDate(today.getDate() + i)
+      if (days.includes(String(d.getDay()))) {
+        return d.toISOString().split('T')[0]
+      }
+    }
+    return today.toISOString().split('T')[0]
+  }
+
+  function toggleDay(dayIndex) {
+    const d = String(dayIndex)
+    setRecurringDays(prev =>
+      prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]
+    )
   }
 
   async function deleteWorkout(id) {
@@ -52,11 +114,11 @@ export default function Workouts({ session }) {
   if (loading) return <div className="pt-8 text-[#666] text-sm px-5">Caricamento...</div>
 
   if (selectedWorkout) return (
-   <WorkoutDetail
-  workout={selectedWorkout}
-  session={session}
-  onBack={() => { setSelectedWorkout(null); fetchWorkouts() }}
-/>
+    <WorkoutDetail
+      workout={selectedWorkout}
+      session={session}
+      onBack={() => { setSelectedWorkout(null); fetchWorkouts() }}
+    />
   )
 
   return (
@@ -93,12 +155,20 @@ export default function Workouts({ session }) {
                 <div className="text-white font-bold text-lg">{w.name}</div>
                 {w.target_muscles && <div className="text-[#666] text-xs mt-1">{w.target_muscles}</div>}
               </div>
-              <button
-                onClick={e => { e.stopPropagation(); deleteWorkout(w.id) }}
-                className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center ml-2"
-              >
-                🗑
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={e => { e.stopPropagation(); setSchedulingWorkout(w); setShowScheduleModal(true) }}
+                  className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
+                >
+                  📅
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); deleteWorkout(w.id) }}
+                  className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
+                >
+                  🗑
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -113,6 +183,7 @@ export default function Workouts({ session }) {
         </button>
       </div>
 
+      {/* MODAL NUOVA SCHEDA */}
       {showModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowModal(false)}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10" onClick={e => e.stopPropagation()}>
@@ -138,6 +209,76 @@ export default function Workouts({ session }) {
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
             >
               {saving ? 'Salvataggio...' : 'Crea scheda'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PROGRAMMA ALLENAMENTO */}
+      {showScheduleModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => { setShowScheduleModal(false); setSchedulingWorkout(null) }}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10" onClick={e => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
+            <div className="text-white font-black text-2xl tracking-wide mb-1">PROGRAMMA</div>
+            <div className="text-[#666] text-xs mb-5">{schedulingWorkout?.name}</div>
+
+            {/* TIPO */}
+            <div className="grid grid-cols-2 gap-2 mb-5">
+              <button
+                onClick={() => setScheduleType('single')}
+                className={`py-3 rounded-xl text-sm font-bold border transition-all ${scheduleType === 'single' ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
+              >
+                📅 Data singola
+              </button>
+              <button
+                onClick={() => setScheduleType('recurring')}
+                className={`py-3 rounded-xl text-sm font-bold border transition-all ${scheduleType === 'recurring' ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
+              >
+                🔁 Ricorrente
+              </button>
+            </div>
+
+            {scheduleType === 'single' ? (
+              <div>
+                <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Data allenamento</label>
+                <input
+                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+                  type="date"
+                  min={new Date().toISOString().split('T')[0]}
+                  value={scheduleDate}
+                  onChange={e => setScheduleDate(e.target.value)}
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-[#666] text-xs uppercase tracking-widest block mb-3">Giorni della settimana</label>
+                <div className="grid grid-cols-7 gap-1 mb-4">
+                  {DAYS.map((day, i) => (
+                    <button
+                      key={i}
+                      onClick={() => toggleDay(i)}
+                      className={`py-2 rounded-lg text-xs font-bold border transition-all ${recurringDays.includes(String(i)) ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={saveSchedule}
+              disabled={savingSchedule || (scheduleType === 'single' ? !scheduleDate : recurringDays.length === 0)}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-3"
+            >
+              {savingSchedule ? 'Salvataggio...' : 'Salva programmazione'}
+            </button>
+
+            <button
+              onClick={() => { setShowScheduleModal(false); setSchedulingWorkout(null) }}
+              className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+            >
+              Salta per ora
             </button>
           </div>
         </div>
