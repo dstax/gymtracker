@@ -10,6 +10,8 @@ export default function Profile({ session, onProfileUpdate }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [editingWeight, setEditingWeight] = useState(null)
+  const [editingValue, setEditingValue] = useState('')
 
   useEffect(() => {
     getProfile()
@@ -77,6 +79,17 @@ export default function Profile({ session, onProfileUpdate }) {
 
   async function deleteWeightEntry(id) {
     await supabase.from('weight_history').delete().eq('id', id)
+    getWeightHistory()
+  }
+
+  async function saveWeightEdit(id) {
+    if (!editingValue) return
+    await supabase
+      .from('weight_history')
+      .update({ weight: parseFloat(editingValue) })
+      .eq('id', id)
+    setEditingWeight(null)
+    setEditingValue('')
     getWeightHistory()
   }
 
@@ -186,22 +199,56 @@ export default function Profile({ session, onProfileUpdate }) {
           <div className="text-[#666] text-xs uppercase tracking-widest mb-3">Storico peso</div>
           <div className="space-y-2">
             {weightHistory.map((w, i) => (
-              <div key={w.id} className="flex items-center justify-between p-3 bg-[#111] border border-[#2a2a2a] rounded-xl">
-                <span className="text-[#666] text-xs">{formatDate(w.recorded_at)}</span>
-                <div className="flex items-center gap-3">
-                  <span className="text-[#e8ff47] font-mono font-bold">{w.weight} kg</span>
-                  {i < weightHistory.length - 1 && (
-                    <span className={`text-xs ${w.weight < weightHistory[i + 1].weight ? 'text-green-400' : w.weight > weightHistory[i + 1].weight ? 'text-red-400' : 'text-[#666]'}`}>
-                      {w.weight < weightHistory[i + 1].weight ? '↓' : w.weight > weightHistory[i + 1].weight ? '↑' : '—'}
-                    </span>
-                  )}
-                  <button
-                    onClick={() => deleteWeightEntry(w.id)}
-                    className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
-                  >
-                    ✕
-                  </button>
-                </div>
+              <div key={w.id} className="p-3 bg-[#111] border border-[#2a2a2a] rounded-xl">
+                {editingWeight === w.id ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[#666] text-xs flex-1">{formatDate(w.recorded_at)}</span>
+                    <input
+                      className="bg-[#1a1a1a] border border-[#e8ff47] rounded-lg px-3 py-1.5 text-[#e8ff47] font-mono font-bold text-sm text-center w-20 outline-none"
+                      type="number" min="30" max="300" step="0.1"
+                      value={editingValue}
+                      onChange={e => setEditingValue(e.target.value)}
+                      autoFocus
+                    />
+                    <span className="text-[#666] text-xs">kg</span>
+                    <button
+                      onClick={() => saveWeightEdit(w.id)}
+                      className="w-7 h-7 rounded-lg bg-[#e8ff47] text-black text-xs font-bold flex items-center justify-center"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      onClick={() => { setEditingWeight(null); setEditingValue('') }}
+                      className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#666] text-xs flex items-center justify-center"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#666] text-xs">{formatDate(w.recorded_at)}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#e8ff47] font-mono font-bold">{w.weight} kg</span>
+                      {i < weightHistory.length - 1 && (
+                        <span className={`text-xs ${w.weight < weightHistory[i + 1].weight ? 'text-green-400' : w.weight > weightHistory[i + 1].weight ? 'text-red-400' : 'text-[#666]'}`}>
+                          {w.weight < weightHistory[i + 1].weight ? '↓' : w.weight > weightHistory[i + 1].weight ? '↑' : '—'}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => { setEditingWeight(w.id); setEditingValue(w.weight) }}
+                        className="w-6 h-6 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-[#666] text-xs flex items-center justify-center"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        onClick={() => deleteWeightEntry(w.id)}
+                        className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
