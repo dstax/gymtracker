@@ -2,49 +2,37 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import Session from './Session'
 
-const EXERCISE_LIBRARY = [
-  { group: '🦵 Gambe & Glutei', exercises: [
-    { name: 'Leg Press', machine: 'Leg Press' },
-    { name: 'Glute Press', machine: 'Glute Press' },
-    { name: 'Leg Extension', machine: 'Leg Extension' },
-    { name: 'Leg Curl (Seduto)', machine: 'Leg Curl (Seduto)' },
-    { name: 'Standing Leg Curl', machine: 'Standing Leg Curl' },
-  ]},
-  { group: '🫁 Petto', exercises: [
-    { name: 'Chest Press', machine: 'Chest Press' },
-    { name: 'Incline Chest Press', machine: 'Incline Chest Press' },
-    { name: 'Pectoral Machine', machine: 'Pectoral Machine' },
-    { name: 'Panca Piana', machine: 'Panca Piana (Bilanciere/Manubri)' },
-  ]},
-  { group: '💪 Spalle', exercises: [
-    { name: 'Shoulder Press', machine: 'Shoulder Press' },
-    { name: 'Delts Machine', machine: 'Delts Machine' },
-  ]},
-  { group: '🦾 Tricipiti', exercises: [
-    { name: 'Arm Extension', machine: 'Arm Extension' },
-    { name: 'Tricipiti ai Cavi', machine: 'Cavi' },
-  ]},
-  { group: '🏋️ Schiena', exercises: [
-    { name: 'Vertical Traction / Lat Machine', machine: 'Vertical Traction / Lat Machine' },
-    { name: 'Low Row', machine: 'Low Row' },
-    { name: 'Row (Macchina)', machine: 'Row (Macchina)' },
-    { name: 'Pulley', machine: 'Pulley' },
-  ]},
-  { group: '💪 Bicipiti', exercises: [
-    { name: 'Arm Curl', machine: 'Arm Curl' },
-    { name: 'Curl con Barra EZ', machine: 'Barra EZ' },
-    { name: 'Curl con Manubri', machine: 'Bilancieri e Manubri' },
-  ]},
-  { group: '🤸 Core', exercises: [
-    { name: 'Abdominal Crunch', machine: 'Abdominal Crunch' },
-    { name: 'Plank', machine: 'Corpo libero' },
-  ]},
+const DEFAULT_EXERCISES = [
+  { name: 'Abdominal Crunch', machine: 'Abdominal Crunch' },
+  { name: 'Arm Curl', machine: 'Arm Curl' },
+  { name: 'Arm Extension', machine: 'Arm Extension' },
+  { name: 'Chest Press', machine: 'Chest Press' },
+  { name: 'Curl con Barra EZ', machine: 'Barra EZ' },
+  { name: 'Curl con Manubri', machine: 'Bilancieri e Manubri' },
+  { name: 'Delts Machine', machine: 'Delts Machine' },
+  { name: 'Glute Press', machine: 'Glute Press' },
+  { name: 'Incline Chest Press', machine: 'Incline Chest Press' },
+  { name: 'Leg Curl (Seduto)', machine: 'Leg Curl (Seduto)' },
+  { name: 'Leg Extension', machine: 'Leg Extension' },
+  { name: 'Leg Press', machine: 'Leg Press' },
+  { name: 'Low Row', machine: 'Low Row' },
+  { name: 'Panca Piana', machine: 'Panca Piana (Bilanciere/Manubri)' },
+  { name: 'Pectoral Machine', machine: 'Pectoral Machine' },
+  { name: 'Plank', machine: 'Corpo libero' },
+  { name: 'Pulley', machine: 'Pulley' },
+  { name: 'Row (Macchina)', machine: 'Row (Macchina)' },
+  { name: 'Shoulder Press', machine: 'Shoulder Press' },
+  { name: 'Standing Leg Curl', machine: 'Standing Leg Curl' },
+  { name: 'Tricipiti ai Cavi', machine: 'Cavi' },
+  { name: 'Vertical Traction / Lat Machine', machine: 'Vertical Traction / Lat Machine' },
 ]
 
 export default function WorkoutDetail({ workout, session, onBack }) {
   const [exercises, setExercises] = useState([])
+  const [customExercises, setCustomExercises] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showCustomModal, setShowCustomModal] = useState(false)
   const [sessionActive, setSessionActive] = useState(false)
   const [selectedEx, setSelectedEx] = useState('')
   const [exMachine, setExMachine] = useState('')
@@ -53,8 +41,14 @@ export default function WorkoutDetail({ workout, session, onBack }) {
   const [defaultKg, setDefaultKg] = useState(0)
   const [kgPerSet, setKgPerSet] = useState([0, 0, 0])
   const [saving, setSaving] = useState(false)
+  const [newExName, setNewExName] = useState('')
+  const [newExMachine, setNewExMachine] = useState('')
+  const [savingCustom, setSavingCustom] = useState(false)
 
-  useEffect(() => { fetchExercises() }, [])
+  useEffect(() => {
+    fetchExercises()
+    fetchCustomExercises()
+  }, [])
 
   useEffect(() => {
     setKgPerSet(Array.from({ length: parseInt(numSets) }, (_, i) => kgPerSet[i] ?? parseFloat(defaultKg) ?? 0))
@@ -74,10 +68,27 @@ export default function WorkoutDetail({ workout, session, onBack }) {
     setLoading(false)
   }
 
+  async function fetchCustomExercises() {
+    const { data } = await supabase
+      .from('custom_exercises')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('name')
+    if (data) setCustomExercises(data)
+  }
+
+  function getAllExercises() {
+    const custom = customExercises.map(e => ({ name: e.name, machine: e.machine || '', isCustom: true }))
+    const all = [...DEFAULT_EXERCISES, ...custom]
+    return all.sort((a, b) => a.name.localeCompare(b.name))
+  }
+
   function onSelectExercise(name) {
     setSelectedEx(name)
-    const found = EXERCISE_LIBRARY.flatMap(g => g.exercises).find(e => e.name === name)
+    const all = getAllExercises()
+    const found = all.find(e => e.name === name)
     if (found) setExMachine(found.machine)
+    else setExMachine('')
   }
 
   async function addExercise() {
@@ -108,6 +119,25 @@ export default function WorkoutDetail({ workout, session, onBack }) {
     setSaving(false)
   }
 
+  async function saveCustomExercise() {
+    if (!newExName.trim()) return
+    setSavingCustom(true)
+    const { error } = await supabase
+      .from('custom_exercises')
+      .insert({
+        user_id: session.user.id,
+        name: newExName.trim(),
+        machine: newExMachine.trim() || null
+      })
+    if (!error) {
+      setNewExName('')
+      setNewExMachine('')
+      setShowCustomModal(false)
+      fetchCustomExercises()
+    }
+    setSavingCustom(false)
+  }
+
   function resetModal() {
     setSelectedEx('')
     setExMachine('')
@@ -128,10 +158,10 @@ export default function WorkoutDetail({ workout, session, onBack }) {
 
   if (sessionActive) return (
     <Session
-  workout={workout}
-  userSession={session}
-  onEnd={() => setSessionActive(false)}
-/>
+      workout={workout}
+      userSession={session}
+      onEnd={() => setSessionActive(false)}
+    />
   )
 
   return (
@@ -198,25 +228,32 @@ export default function WorkoutDetail({ workout, session, onBack }) {
         </div>
       )}
 
+      {/* MODAL AGGIUNGI ESERCIZIO */}
       {showModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={resetModal}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
-            <div className="text-white font-black text-2xl tracking-wide mb-4">AGGIUNGI ESERCIZIO</div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-white font-black text-2xl tracking-wide">AGGIUNGI ESERCIZIO</div>
+              <button
+                onClick={() => { resetModal(); setShowCustomModal(true) }}
+                className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-3 py-1.5"
+              >
+                ＋ Nuovo
+              </button>
+            </div>
 
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Esercizio</label>
             <select
-              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3 appearance-none"
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
               value={selectedEx}
               onChange={e => onSelectExercise(e.target.value)}
             >
               <option value="">— Seleziona dalla libreria —</option>
-              {EXERCISE_LIBRARY.map(group => (
-                <optgroup key={group.group} label={group.group}>
-                  {group.exercises.map(ex => (
-                    <option key={ex.name} value={ex.name}>{ex.name}</option>
-                  ))}
-                </optgroup>
+              {getAllExercises().map(ex => (
+                <option key={ex.name} value={ex.name}>
+                  {ex.name}{ex.isCustom ? ' ★' : ''}
+                </option>
               ))}
             </select>
 
@@ -288,6 +325,55 @@ export default function WorkoutDetail({ workout, session, onBack }) {
           </div>
         </div>
       )}
+
+      {/* MODAL NUOVO ESERCIZIO PERSONALIZZATO */}
+      {showCustomModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowCustomModal(false)}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10" onClick={e => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
+            <div className="text-white font-black text-2xl tracking-wide mb-4">NUOVO ESERCIZIO</div>
+
+            <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome esercizio</label>
+            <input
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
+              placeholder="es. Bulgarian Split Squat"
+              value={newExName}
+              onChange={e => setNewExName(e.target.value)}
+            />
+
+            <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Macchinario (opzionale)</label>
+            <input
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+              placeholder="es. Manubri, Bilanciere, Corpo libero"
+              value={newExMachine}
+              onChange={e => setNewExMachine(e.target.value)}
+            />
+
+            <button
+              onClick={saveCustomExercise}
+              disabled={savingCustom || !newExName.trim()}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-3"
+            >
+              {savingCustom ? 'Salvataggio...' : 'Salva esercizio'}
+            </button>
+
+            <button
+              onClick={() => { setShowCustomModal(false); setShowModal(true) }}
+              className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+            >
+              ← Torna alla libreria
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+```
+
+Poi push:
+```
+cd gymtracker
+git add .
+git commit -m "esercizi in ordine alfabetico e personalizzati"
+git push
