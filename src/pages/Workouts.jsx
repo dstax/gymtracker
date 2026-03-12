@@ -4,7 +4,7 @@ import WorkoutDetail from './WorkoutDetail'
 
 const DAYS = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab']
 
-export default function Workouts({ session }) {
+export default function Workouts({ session, initialWorkout, onClearInitial, onScheduleUpdate }) {
   const [workouts, setWorkouts] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -18,11 +18,17 @@ export default function Workouts({ session }) {
   const [scheduleDate, setScheduleDate] = useState('')
   const [recurringDays, setRecurringDays] = useState([])
   const [savingSchedule, setSavingSchedule] = useState(false)
-  const [justCreated, setJustCreated] = useState(null)
 
   useEffect(() => {
     fetchWorkouts()
   }, [])
+
+  useEffect(() => {
+    if (initialWorkout && !loading) {
+      setSelectedWorkout(initialWorkout)
+      if (onClearInitial) onClearInitial()
+    }
+  }, [initialWorkout, loading])
 
   async function fetchWorkouts() {
     const { data } = await supabase
@@ -48,7 +54,6 @@ export default function Workouts({ session }) {
       setNewMuscles('')
       setShowModal(false)
       fetchWorkouts()
-      setJustCreated(data)
       setSchedulingWorkout(data)
       setShowScheduleModal(true)
     }
@@ -84,6 +89,7 @@ export default function Workouts({ session }) {
     setScheduleDate('')
     setRecurringDays([])
     setScheduleType('single')
+    if (onScheduleUpdate) onScheduleUpdate()
   }
 
   function getNextOccurrence(days) {
@@ -222,7 +228,6 @@ export default function Workouts({ session }) {
             <div className="text-white font-black text-2xl tracking-wide mb-1">PROGRAMMA</div>
             <div className="text-[#666] text-xs mb-5">{schedulingWorkout?.name}</div>
 
-            {/* TIPO */}
             <div className="grid grid-cols-2 gap-2 mb-5">
               <button
                 onClick={() => setScheduleType('single')}
