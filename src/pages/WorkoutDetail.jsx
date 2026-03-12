@@ -132,10 +132,15 @@ export default function WorkoutDetail({ workout, session, onBack }) {
     if (!error) {
       setNewExName('')
       setNewExMachine('')
-      setShowCustomModal(false)
       fetchCustomExercises()
     }
     setSavingCustom(false)
+  }
+
+  async function deleteCustomExercise(id) {
+    if (!confirm('Eliminare questo esercizio?')) return
+    await supabase.from('custom_exercises').delete().eq('id', id)
+    fetchCustomExercises()
   }
 
   function resetModal() {
@@ -329,9 +334,9 @@ export default function WorkoutDetail({ workout, session, onBack }) {
       {/* MODAL NUOVO ESERCIZIO PERSONALIZZATO */}
       {showCustomModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowCustomModal(false)}>
-          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10" onClick={e => e.stopPropagation()}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
-            <div className="text-white font-black text-2xl tracking-wide mb-4">NUOVO ESERCIZIO</div>
+            <div className="text-white font-black text-2xl tracking-wide mb-4">ESERCIZI PERSONALIZZATI</div>
 
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome esercizio</label>
             <input
@@ -352,14 +357,36 @@ export default function WorkoutDetail({ workout, session, onBack }) {
             <button
               onClick={saveCustomExercise}
               disabled={savingCustom || !newExName.trim()}
-              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-3"
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-5"
             >
               {savingCustom ? 'Salvataggio...' : 'Salva esercizio'}
             </button>
 
+            {customExercises.length > 0 && (
+              <div>
+                <div className="text-[#666] text-xs uppercase tracking-widest mb-3">I tuoi esercizi</div>
+                <div className="space-y-2">
+                  {customExercises.map(ex => (
+                    <div key={ex.id} className="flex items-center justify-between p-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl">
+                      <div>
+                        <div className="text-white text-sm font-medium">{ex.name}</div>
+                        {ex.machine && <div className="text-[#666] text-xs mt-0.5">{ex.machine}</div>}
+                      </div>
+                      <button
+                        onClick={() => deleteCustomExercise(ex.id)}
+                        className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center ml-2"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <button
               onClick={() => { setShowCustomModal(false); setShowModal(true) }}
-              className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+              className="w-full mt-5 py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
             >
               ← Torna alla libreria
             </button>
