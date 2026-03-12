@@ -27,24 +27,23 @@ export default function Home({ session }) {
 
       <div className="flex-1 overflow-y-auto pb-24 px-5">
 
-        {page === 'home' && (
+{page === 'home' && (
   <div className="pt-8">
-    <div className="flex items-center justify-between">
-      <div>
-        <div className="text-[#666] text-xs tracking-widest uppercase">Bentornato</div>
-        <div className="text-[#e8ff47] text-5xl font-black tracking-wide mt-1">
-          {name.toUpperCase()}
-        </div>
-        <p className="text-[#444] text-sm italic mt-2">"La costanza batte il talento."</p>
-      </div>
-      <img src="/logo_gymtracker_TRASP.png" alt="GymTracker" className="w-24 h-24 object-contain" />
+    <div className="flex flex-col items-center mb-6">
+      <img src="/logo_gymtracker_TRASP.png" alt="GymTracker" className="w-48 h-48 object-contain" />
     </div>
-            <div className="mt-6 p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
-              <p className="text-[#666] text-xs uppercase tracking-widest">Nessun allenamento programmato</p>
-              <p className="text-white text-sm mt-1">Crea la tua prima scheda dalla sezione Schede!</p>
-            </div>
-          </div>
-        )}
+    <div className="text-[#666] text-xs tracking-widest uppercase">Bentornato</div>
+    <div className="text-[#e8ff47] text-5xl font-black tracking-wide mt-1">
+      {name.toUpperCase()}
+    </div>
+    <p className="text-[#444] text-sm italic mt-2">"La costanza batte il talento."</p>
+    <div className="mt-6 p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+      <p className="text-[#666] text-xs uppercase tracking-widest">Nessun allenamento programmato</p>
+      <p className="text-white text-sm mt-1">Crea la tua prima scheda dalla sezione Schede!</p>
+    </div>
+  </div>
+)}
+```
 
         {page === 'workouts' && <Workouts session={session} />}
 
