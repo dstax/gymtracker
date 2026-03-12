@@ -19,13 +19,17 @@ export default function Auth() {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) setError(error.message)
     } else {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { data: { name } }
       })
       if (error) setError(error.message)
-      else setMessage('Controlla la tua email per confermare la registrazione!')
+      else if (data.session) {
+        // Login automatico senza conferma email
+      } else {
+        setMessage('Registrazione completata! Puoi accedere ora.')
+      }
     }
     setLoading(false)
   }
