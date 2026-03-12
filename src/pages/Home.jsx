@@ -7,18 +7,45 @@ import History from './History'
 export default function Home({ session }) {
   const [page, setPage] = useState('home')
   const [profile, setProfile] = useState(null)
+  const [scheduled, setScheduled] = useState([])
 
   useEffect(() => {
-    async function getProfile() {
-      const { data } = await supabase
-        .from('profiles')
-        .select('name')
-        .eq('id', session.user.id)
-        .single()
-      if (data) setProfile(data)
-    }
     getProfile()
+    getScheduled()
   }, [session])
+
+  async function getProfile() {
+    const { data } = await supabase
+      .from('profiles')
+      .select('name')
+      .eq('id', session.user.id)
+      .single()
+    if (data) setProfile(data)
+  }
+
+  async function getScheduled() {
+    const today = new Date().toISOString().split('T')[0]
+    const { data } = await supabase
+      .from('scheduled_workouts')
+      .select('*, workouts(name)')
+      .eq('user_id', session.user.id)
+      .gte('scheduled_date', today)
+      .order('scheduled_date', { ascending: true })
+      .limit(3)
+    if (data) setScheduled(data)
+  }
+
+  function formatScheduledDate(dateStr) {
+    const date = new Date(dateStr + 'T00:00:00')
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(today.getDate() + 1)
+
+    if (date.getTime() === today.getTime()) return 'Oggi'
+    if (date.getTime() === tomorrow.getTime()) return 'Domani'
+    return date.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })
+  }
 
   const name = profile?.name || session.user.user_metadata?.name || session.user.email.split('@')[0]
 
@@ -37,14 +64,40 @@ export default function Home({ session }) {
               {name.toUpperCase()}
             </div>
             <p className="text-[#888] text-sm italic mt-2">"La costanza batte il talento."</p>
-            <div className="mt-6 p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
-              <p className="text-[#999] text-xs uppercase tracking-widest">Nessun allenamento programmato</p>
-              <p className="text-white text-sm mt-1">Crea la tua prima scheda dalla sezione Schede!</p>
+
+            <div className="mt-6">
+              {scheduled.length === 0 ? (
+                <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+                  <p className="text-[#999] text-xs uppercase tracking-widest">Nessun allenamento programmato</p>
+                  <p className="text-white text-sm mt-1">Vai su Schede per programmare i tuoi allenamenti!</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-[#999] text-xs uppercase tracking-widest mb-2">Prossimi allenamenti</div>
+                  {scheduled.map(s => (
+                    <div key={s.id} className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-[#e8ff47] text-xs uppercase tracking-widest font-bold capitalize">
+                            {formatScheduledDate(s.scheduled_date)}
+                          </div>
+                          <div className="text-white font-black text-lg mt-0.5">
+                            {s.workouts?.name}
+                          </div>
+                        </div>
+                        <div className="text-2xl">
+                          {s.is_recurring ? '🔁' : '📅'}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {page === 'workouts' && <Workouts session={session} />}
+        {page === 'workouts' && <Workouts session={session} onScheduleUpdate={getScheduled} />}
         {page === 'history' && <History session={session} />}
 
         {page === 'profile' && (
@@ -65,7 +118,7 @@ export default function Home({ session }) {
         ].map(item => (
           <button
             key={item.id}
-            onClick={() => setPage(item.id)}
+            onClick={() => { setPage(item.id); if (item.id === 'home') getScheduled() }}
             className="flex-1 flex flex-col items-center gap-1 py-1"
           >
             <span className="text-xl">{item.icon}</span>
