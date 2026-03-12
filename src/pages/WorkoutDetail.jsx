@@ -369,11 +369,3 @@ export default function WorkoutDetail({ workout, session, onBack }) {
     </div>
   )
 }
-```
-
-Poi push:
-```
-cd gymtracker
-git add .
-git commit -m "esercizi in ordine alfabetico e personalizzati"
-git push
