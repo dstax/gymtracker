@@ -9,11 +9,16 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [showRenameModal, setShowRenameModal] = useState(false)
   const [selectedWorkout, setSelectedWorkout] = useState(null)
   const [schedulingWorkout, setSchedulingWorkout] = useState(null)
+  const [renamingWorkout, setRenamingWorkout] = useState(null)
   const [newName, setNewName] = useState('')
   const [newMuscles, setNewMuscles] = useState('')
+  const [renameName, setRenameName] = useState('')
+  const [renameMuscles, setRenameMuscles] = useState('')
   const [saving, setSaving] = useState(false)
+  const [savingRename, setSavingRename] = useState(false)
   const [scheduleType, setScheduleType] = useState('single')
   const [scheduleDate, setScheduleDate] = useState('')
   const [recurringDays, setRecurringDays] = useState([])
@@ -23,12 +28,12 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
     fetchWorkouts()
   }, [])
 
- useEffect(() => {
-  if (initialWorkout) {
-    setSelectedWorkout(initialWorkout)
-    if (onClearInitial) onClearInitial()
-  }
-}, [initialWorkout])
+  useEffect(() => {
+    if (initialWorkout) {
+      setSelectedWorkout(initialWorkout)
+      if (onClearInitial) onClearInitial()
+    }
+  }, [initialWorkout])
 
   async function fetchWorkouts() {
     const { data } = await supabase
@@ -58,6 +63,21 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
       setShowScheduleModal(true)
     }
     setSaving(false)
+  }
+
+  async function renameWorkout() {
+    if (!renameName.trim() || !renamingWorkout) return
+    setSavingRename(true)
+    const { error } = await supabase
+      .from('workouts')
+      .update({ name: renameName.trim(), target_muscles: renameMuscles.trim() })
+      .eq('id', renamingWorkout.id)
+    if (!error) {
+      setShowRenameModal(false)
+      setRenamingWorkout(null)
+      fetchWorkouts()
+    }
+    setSavingRename(false)
   }
 
   async function saveSchedule() {
@@ -163,6 +183,12 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  onClick={e => { e.stopPropagation(); setRenamingWorkout(w); setRenameName(w.name); setRenameMuscles(w.target_muscles || ''); setShowRenameModal(true) }}
+                  className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
+                >
+                  ✎
+                </button>
+                <button
                   onClick={e => { e.stopPropagation(); setSchedulingWorkout(w); setShowScheduleModal(true) }}
                   className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
                 >
@@ -215,6 +241,38 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
             >
               {saving ? 'Salvataggio...' : 'Crea scheda'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RINOMINA SCHEDA */}
+      {showRenameModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowRenameModal(false)}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10" onClick={e => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
+            <div className="text-white font-black text-2xl tracking-wide mb-4">MODIFICA SCHEDA</div>
+            <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome scheda</label>
+            <input
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
+              placeholder="es. Giorno A — Push"
+              value={renameName}
+              onChange={e => setRenameName(e.target.value)}
+              autoFocus
+            />
+            <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Muscoli target</label>
+            <input
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+              placeholder="es. Petto, Spalle, Tricipiti"
+              value={renameMuscles}
+              onChange={e => setRenameMuscles(e.target.value)}
+            />
+            <button
+              onClick={renameWorkout}
+              disabled={savingRename || !renameName.trim()}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
+            >
+              {savingRename ? 'Salvataggio...' : 'Salva modifiche'}
             </button>
           </div>
         </div>
