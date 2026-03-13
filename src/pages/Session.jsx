@@ -11,6 +11,7 @@ export default function Session({ workout, userSession, onEnd }) {
   const [restActive, setRestActive] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [showExerciseList, setShowExerciseList] = useState(false)
   const totalRef = useRef(null)
   const restRef = useRef(null)
 
@@ -61,6 +62,15 @@ export default function Session({ workout, userSession, onEnd }) {
       setRestSeconds(0)
       setRestActive(true)
     }
+  }
+
+  function moveExercise(fromIdx, toIdx) {
+    if (toIdx < 0 || toIdx >= exercises.length) return
+    const updated = [...exercises]
+    const [moved] = updated.splice(fromIdx, 1)
+    updated.splice(toIdx, 0, moved)
+    setExercises(updated)
+    setCurrentIdx(toIdx)
   }
 
   function nextExercise() {
@@ -170,7 +180,15 @@ export default function Session({ workout, userSession, onEnd }) {
             <div className="text-[#666] text-xs uppercase tracking-widest">In corso</div>
             <div className="text-white font-black text-xl tracking-wide">{workout.name}</div>
           </div>
-          <div className="text-[#666] text-xs">Esercizio {currentIdx + 1} di {exercises.length}</div>
+          <div className="flex items-center gap-2">
+            <div className="text-[#666] text-xs">Esercizio {currentIdx + 1} di {exercises.length}</div>
+            <button
+              onClick={() => setShowExerciseList(true)}
+              className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
+            >
+              ☰
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 mt-3">
@@ -192,13 +210,33 @@ export default function Session({ workout, userSession, onEnd }) {
 
       {/* ESERCIZIO */}
       <div className="px-5 pt-4 pb-2">
-        <div className="text-white font-black text-xl">{currentEx.name}</div>
-        <div className="text-[#666] text-xs mt-1">{currentSets.length} serie</div>
-        {currentEx.machine && (
-          <div className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/25 rounded-lg px-2 py-1 text-blue-400 text-xs mt-2">
-            🟢 {currentEx.machine}
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="text-white font-black text-xl">{currentEx.name}</div>
+            <div className="text-[#666] text-xs mt-1">{currentSets.length} serie</div>
+            {currentEx.machine && (
+              <div className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/25 rounded-lg px-2 py-1 text-blue-400 text-xs mt-2">
+                🟢 {currentEx.machine}
+              </div>
+            )}
           </div>
-        )}
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={() => moveExercise(currentIdx, currentIdx - 1)}
+              disabled={currentIdx === 0}
+              className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center disabled:opacity-20"
+            >
+              ↑
+            </button>
+            <button
+              onClick={() => moveExercise(currentIdx, currentIdx + 1)}
+              disabled={currentIdx === exercises.length - 1}
+              className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center disabled:opacity-20"
+            >
+              ↓
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* TABELLA SERIE */}
@@ -270,8 +308,56 @@ export default function Session({ workout, userSession, onEnd }) {
           disabled={saving}
           className="w-full py-3 rounded-xl text-sm font-semibold bg-red-500/10 border border-red-500/30 text-red-400 disabled:opacity-50"
         >
-{saving ? 'Salvataggio in corso...' : '⚠️ Abbandona sessione'}        </button>
+          {saving ? 'Salvataggio in corso...' : '⚠️ Abbandona sessione'}
+        </button>
       </div>
+
+      {/* MODAL LISTA ESERCIZI */}
+      {showExerciseList && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowExerciseList(false)}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
+            <div className="text-white font-black text-xl tracking-wide mb-4">ESERCIZI</div>
+            <div className="space-y-2">
+              {exercises.map((ex, i) => (
+                <div
+                  key={ex.id}
+                  className={`flex items-center justify-between p-3 rounded-xl border transition-all ${i === currentIdx ? 'bg-[#e8ff47]/10 border-[#e8ff47]/30' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}
+                >
+                  <button
+                    onClick={() => { setCurrentIdx(i); setShowExerciseList(false) }}
+                    className="flex items-center gap-3 flex-1 text-left"
+                  >
+                    <span className="text-[#444] font-mono text-xs w-5">{i + 1}</span>
+                    <div>
+                      <div className={`text-sm font-bold ${i === currentIdx ? 'text-[#e8ff47]' : 'text-white'}`}>{ex.name}</div>
+                      {completedSets[ex.sets?.[0]?.id] && (
+                        <div className="text-green-400 text-xs">✓ Completato</div>
+                      )}
+                    </div>
+                  </button>
+                  <div className="flex flex-col gap-1 ml-2">
+                    <button
+                      onClick={() => moveExercise(i, i - 1)}
+                      disabled={i === 0}
+                      className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#111] text-white text-xs flex items-center justify-center disabled:opacity-20"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      onClick={() => moveExercise(i, i + 1)}
+                      disabled={i === exercises.length - 1}
+                      className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#111] text-white text-xs flex items-center justify-center disabled:opacity-20"
+                    >
+                      ↓
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
