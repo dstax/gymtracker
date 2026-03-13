@@ -3,11 +3,13 @@ import { supabase } from '../lib/supabase'
 import Profile from './Profile'
 import Workouts from './Workouts'
 import History from './History'
+import WorkoutDetail from './WorkoutDetail'
 
 export default function Home({ session }) {
   const [page, setPage] = useState('home')
   const [profile, setProfile] = useState(null)
   const [scheduled, setScheduled] = useState([])
+  const [directWorkout, setDirectWorkout] = useState(null)
 
   useEffect(() => {
     getProfile()
@@ -27,11 +29,11 @@ export default function Home({ session }) {
     const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase
       .from('scheduled_workouts')
-      .select('*, workouts(name)')
+      .select('*, workouts(*)')
       .eq('user_id', session.user.id)
       .gte('scheduled_date', today)
       .order('scheduled_date', { ascending: true })
-      .limit(3)
+      .limit(2)
     if (data) setScheduled(data)
   }
 
@@ -41,13 +43,24 @@ export default function Home({ session }) {
     today.setHours(0, 0, 0, 0)
     const tomorrow = new Date(today)
     tomorrow.setDate(today.getDate() + 1)
-
     if (date.getTime() === today.getTime()) return 'Oggi'
     if (date.getTime() === tomorrow.getTime()) return 'Domani'
     return date.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })
   }
 
   const name = profile?.name || session.user.user_metadata?.name || session.user.email.split('@')[0]
+
+  if (directWorkout) return (
+    <div className="min-h-screen bg-[#0a0a0a] text-white max-w-[430px] mx-auto relative flex flex-col">
+      <div className="flex-1 overflow-y-auto pb-24 px-5">
+        <WorkoutDetail
+          workout={directWorkout}
+          session={session}
+          onBack={() => { setDirectWorkout(null); setPage('home'); getScheduled() }}
+        />
+      </div>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white max-w-[430px] mx-auto relative flex flex-col">
@@ -75,7 +88,11 @@ export default function Home({ session }) {
                 <div className="space-y-3">
                   <div className="text-[#999] text-xs uppercase tracking-widest mb-2">Prossimi allenamenti</div>
                   {scheduled.map(s => (
-                    <div key={s.id} className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+                    <div
+                      key={s.id}
+                      onClick={() => setDirectWorkout(s.workouts)}
+                      className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl cursor-pointer active:scale-[.98] transition-transform"
+                    >
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="text-[#e8ff47] text-xs uppercase tracking-widest font-bold capitalize">
@@ -84,6 +101,7 @@ export default function Home({ session }) {
                           <div className="text-white font-black text-lg mt-0.5">
                             {s.workouts?.name}
                           </div>
+                          <div className="text-[#666] text-xs mt-1">Tocca per iniziare →</div>
                         </div>
                         <div className="text-2xl">
                           {s.is_recurring ? '🔁' : '📅'}
