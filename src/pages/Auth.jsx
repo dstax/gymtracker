@@ -39,7 +39,7 @@ export default function Auth() {
       <div className="w-full max-w-sm">
 
         <div className="text-center mb-10">
-          <img src="/logo_gymtracker_TRASP.png" alt="GymTracker" className="w-24 h-24 object-contain mx-auto mb-3" />
+<img src="/logo_gymtracker_TRASP.png" alt="GymTracker" className="w-36 h-36 object-contain mx-auto mb-3" />
           <div className="text-[#e8ff47] text-3xl font-black tracking-widest mb-2">GYMTRACKER</div>
           <div className="text-[#666] text-xs tracking-widest uppercase">
             {isLogin ? 'Bentornato' : 'Crea il tuo account'}
