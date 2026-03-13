@@ -77,18 +77,27 @@ export default function WorkoutDetail({ workout, session, onBack }) {
     if (data) setCustomExercises(data)
   }
 
+  async function moveExercise(fromIdx, toIdx) {
+    if (toIdx < 0 || toIdx >= exercises.length) return
+    const updated = [...exercises]
+    const [moved] = updated.splice(fromIdx, 1)
+    updated.splice(toIdx, 0, moved)
+    setExercises(updated)
+    // Salva le nuove posizioni nel DB
+    await Promise.all(updated.map((ex, i) =>
+      supabase.from('exercises').update({ position: i }).eq('id', ex.id)
+    ))
+  }
+
   function getAllExercises() {
     const custom = customExercises.map(e => ({ name: e.name, machine: e.machine || '', isCustom: true }))
-    const all = [...DEFAULT_EXERCISES, ...custom]
-    return all.sort((a, b) => a.name.localeCompare(b.name))
+    return [...DEFAULT_EXERCISES, ...custom].sort((a, b) => a.name.localeCompare(b.name))
   }
 
   function onSelectExercise(name) {
     setSelectedEx(name)
-    const all = getAllExercises()
-    const found = all.find(e => e.name === name)
-    if (found) setExMachine(found.machine)
-    else setExMachine('')
+    const found = getAllExercises().find(e => e.name === name)
+    setExMachine(found ? found.machine : '')
   }
 
   async function addExercise() {
@@ -96,21 +105,12 @@ export default function WorkoutDetail({ workout, session, onBack }) {
     setSaving(true)
     const { data: ex, error } = await supabase
       .from('exercises')
-      .insert({
-        workout_id: workout.id,
-        name: selectedEx,
-        machine: exMachine,
-        position: exercises.length
-      })
-      .select()
-      .single()
+      .insert({ workout_id: workout.id, name: selectedEx, machine: exMachine, position: exercises.length })
+      .select().single()
 
     if (!error && ex) {
       const setsToInsert = kgPerSet.map((kg, i) => ({
-        exercise_id: ex.id,
-        reps: parseInt(reps),
-        kg: parseFloat(kg),
-        position: i
+        exercise_id: ex.id, reps: parseInt(reps), kg: parseFloat(kg), position: i
       }))
       await supabase.from('sets').insert(setsToInsert)
       resetModal()
@@ -122,18 +122,12 @@ export default function WorkoutDetail({ workout, session, onBack }) {
   async function saveCustomExercise() {
     if (!newExName.trim()) return
     setSavingCustom(true)
-    const { error } = await supabase
-      .from('custom_exercises')
-      .insert({
-        user_id: session.user.id,
-        name: newExName.trim(),
-        machine: newExMachine.trim() || null
-      })
-    if (!error) {
-      setNewExName('')
-      setNewExMachine('')
-      fetchCustomExercises()
-    }
+    const { error } = await supabase.from('custom_exercises').insert({
+      user_id: session.user.id,
+      name: newExName.trim(),
+      machine: newExMachine.trim() || null
+    })
+    if (!error) { setNewExName(''); setNewExMachine(''); fetchCustomExercises() }
     setSavingCustom(false)
   }
 
@@ -144,13 +138,8 @@ export default function WorkoutDetail({ workout, session, onBack }) {
   }
 
   function resetModal() {
-    setSelectedEx('')
-    setExMachine('')
-    setNumSets(3)
-    setReps(10)
-    setDefaultKg(0)
-    setKgPerSet([0, 0, 0])
-    setShowModal(false)
+    setSelectedEx(''); setExMachine(''); setNumSets(3); setReps(10)
+    setDefaultKg(0); setKgPerSet([0, 0, 0]); setShowModal(false)
   }
 
   async function deleteExercise(id) {
@@ -162,11 +151,7 @@ export default function WorkoutDetail({ workout, session, onBack }) {
   if (loading) return <div className="pt-8 text-[#666] text-sm">Caricamento...</div>
 
   if (sessionActive) return (
-    <Session
-      workout={workout}
-      userSession={session}
-      onEnd={() => setSessionActive(false)}
-    />
+    <Session workout={workout} userSession={session} onEnd={() => setSessionActive(false)} />
   )
 
   return (
@@ -199,7 +184,7 @@ export default function WorkoutDetail({ workout, session, onBack }) {
           </div>
         )}
 
-        {exercises.map(ex => (
+        {exercises.map((ex, idx) => (
           <div key={ex.id} className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
             <div className="flex items-start justify-between">
               <div className="flex-1">
@@ -219,7 +204,30 @@ export default function WorkoutDetail({ workout, session, onBack }) {
                   ))}
                 </div>
               </div>
-              <button onClick={() => deleteExercise(ex.id)} className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center ml-2">✕</button>
+              <div className="flex items-center gap-1 ml-2">
+                <div className="flex flex-col gap-1">
+                  <button
+                    onClick={() => moveExercise(idx, idx - 1)}
+                    disabled={idx === 0}
+                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => moveExercise(idx, idx + 1)}
+                    disabled={idx === exercises.length - 1}
+                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20"
+                  >
+                    ↓
+                  </button>
+                </div>
+                <button
+                  onClick={() => deleteExercise(ex.id)}
+                  className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -256,9 +264,7 @@ export default function WorkoutDetail({ workout, session, onBack }) {
             >
               <option value="">— Seleziona dalla libreria —</option>
               {getAllExercises().map(ex => (
-                <option key={ex.name} value={ex.name}>
-                  {ex.name}{ex.isCustom ? ' ★' : ''}
-                </option>
+                <option key={ex.name} value={ex.name}>{ex.name}{ex.isCustom ? ' ★' : ''}</option>
               ))}
             </select>
 
@@ -272,30 +278,18 @@ export default function WorkoutDetail({ workout, session, onBack }) {
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div>
                 <label className="text-[#666] text-xs uppercase tracking-widest block mb-2 text-center">Serie</label>
-                <input
-                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl py-3 text-white text-2xl font-bold text-center outline-none focus:border-[#e8ff47]"
-                  type="number" min="1" max="10"
-                  value={numSets}
-                  onChange={e => setNumSets(e.target.value)}
-                />
+                <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl py-3 text-white text-2xl font-bold text-center outline-none focus:border-[#e8ff47]"
+                  type="number" min="1" max="10" value={numSets} onChange={e => setNumSets(e.target.value)} />
               </div>
               <div>
                 <label className="text-[#666] text-xs uppercase tracking-widest block mb-2 text-center">Rip.</label>
-                <input
-                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl py-3 text-white text-2xl font-bold text-center outline-none focus:border-[#e8ff47]"
-                  type="number" min="1"
-                  value={reps}
-                  onChange={e => setReps(e.target.value)}
-                />
+                <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl py-3 text-white text-2xl font-bold text-center outline-none focus:border-[#e8ff47]"
+                  type="number" min="1" value={reps} onChange={e => setReps(e.target.value)} />
               </div>
               <div>
                 <label className="text-[#666] text-xs uppercase tracking-widest block mb-2 text-center">Kg base</label>
-                <input
-                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl py-3 text-white text-2xl font-bold text-center outline-none focus:border-[#e8ff47]"
-                  type="number" min="0" step="2.5"
-                  value={defaultKg}
-                  onChange={e => setDefaultKg(e.target.value)}
-                />
+                <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl py-3 text-white text-2xl font-bold text-center outline-none focus:border-[#e8ff47]"
+                  type="number" min="0" step="2.5" value={defaultKg} onChange={e => setDefaultKg(e.target.value)} />
               </div>
             </div>
 
@@ -307,31 +301,23 @@ export default function WorkoutDetail({ workout, session, onBack }) {
                   <span className="text-[#666] text-sm flex-1">{reps} rip</span>
                   <input
                     className="bg-[#111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-[#e8ff47] font-mono font-bold text-sm text-center w-20 outline-none focus:border-[#e8ff47]"
-                    type="number" min="0" step="2.5"
-                    value={kg}
-                    onChange={e => {
-                      const updated = [...kgPerSet]
-                      updated[i] = parseFloat(e.target.value) || 0
-                      setKgPerSet(updated)
-                    }}
+                    type="number" min="0" step="2.5" value={kg}
+                    onChange={e => { const updated = [...kgPerSet]; updated[i] = parseFloat(e.target.value) || 0; setKgPerSet(updated) }}
                   />
                   <span className="text-[#666] text-sm">kg</span>
                 </div>
               ))}
             </div>
 
-            <button
-              onClick={addExercise}
-              disabled={saving || !selectedEx}
-              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
-            >
+            <button onClick={addExercise} disabled={saving || !selectedEx}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               {saving ? 'Salvataggio...' : '＋ Aggiungi alla scheda'}
             </button>
           </div>
         </div>
       )}
 
-      {/* MODAL NUOVO ESERCIZIO PERSONALIZZATO */}
+      {/* MODAL ESERCIZI PERSONALIZZATI */}
       {showCustomModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowCustomModal(false)}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -339,26 +325,15 @@ export default function WorkoutDetail({ workout, session, onBack }) {
             <div className="text-white font-black text-2xl tracking-wide mb-4">ESERCIZI PERSONALIZZATI</div>
 
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome esercizio</label>
-            <input
-              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
-              placeholder="es. Bulgarian Split Squat"
-              value={newExName}
-              onChange={e => setNewExName(e.target.value)}
-            />
+            <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
+              placeholder="es. Bulgarian Split Squat" value={newExName} onChange={e => setNewExName(e.target.value)} />
 
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Macchinario (opzionale)</label>
-            <input
-              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
-              placeholder="es. Manubri, Bilanciere, Corpo libero"
-              value={newExMachine}
-              onChange={e => setNewExMachine(e.target.value)}
-            />
+            <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+              placeholder="es. Manubri, Bilanciere, Corpo libero" value={newExMachine} onChange={e => setNewExMachine(e.target.value)} />
 
-            <button
-              onClick={saveCustomExercise}
-              disabled={savingCustom || !newExName.trim()}
-              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-5"
-            >
+            <button onClick={saveCustomExercise} disabled={savingCustom || !newExName.trim()}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-5">
               {savingCustom ? 'Salvataggio...' : 'Salva esercizio'}
             </button>
 
@@ -372,22 +347,16 @@ export default function WorkoutDetail({ workout, session, onBack }) {
                         <div className="text-white text-sm font-medium">{ex.name}</div>
                         {ex.machine && <div className="text-[#666] text-xs mt-0.5">{ex.machine}</div>}
                       </div>
-                      <button
-                        onClick={() => deleteCustomExercise(ex.id)}
-                        className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center ml-2"
-                      >
-                        ✕
-                      </button>
+                      <button onClick={() => deleteCustomExercise(ex.id)}
+                        className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center ml-2">✕</button>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            <button
-              onClick={() => { setShowCustomModal(false); setShowModal(true) }}
-              className="w-full mt-5 py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
-            >
+            <button onClick={() => { setShowCustomModal(false); setShowModal(true) }}
+              className="w-full mt-5 py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
               ← Torna alla libreria
             </button>
           </div>
