@@ -27,7 +27,7 @@ const DEFAULT_EXERCISES = [
   { name: 'Vertical Traction / Lat Machine', machine: 'Vertical Traction / Lat Machine' },
 ]
 
-export default function WorkoutDetail({ workout, session, onBack }) {
+export default function WorkoutDetail({ workout, session, onBack, scheduledId }) {
   const [exercises, setExercises] = useState([])
   const [customExercises, setCustomExercises] = useState([])
   const [loading, setLoading] = useState(true)
@@ -83,7 +83,6 @@ export default function WorkoutDetail({ workout, session, onBack }) {
     const [moved] = updated.splice(fromIdx, 1)
     updated.splice(toIdx, 0, moved)
     setExercises(updated)
-    // Salva le nuove posizioni nel DB
     await Promise.all(updated.map((ex, i) =>
       supabase.from('exercises').update({ position: i }).eq('id', ex.id)
     ))
@@ -151,7 +150,12 @@ export default function WorkoutDetail({ workout, session, onBack }) {
   if (loading) return <div className="pt-8 text-[#666] text-sm">Caricamento...</div>
 
   if (sessionActive) return (
-    <Session workout={workout} userSession={session} onEnd={() => setSessionActive(false)} />
+    <Session
+      workout={workout}
+      userSession={session}
+      scheduledId={scheduledId}
+      onEnd={() => setSessionActive(false)}
+    />
   )
 
   return (
@@ -210,23 +214,17 @@ export default function WorkoutDetail({ workout, session, onBack }) {
                     onClick={() => moveExercise(idx, idx - 1)}
                     disabled={idx === 0}
                     className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20"
-                  >
-                    ↑
-                  </button>
+                  >↑</button>
                   <button
                     onClick={() => moveExercise(idx, idx + 1)}
                     disabled={idx === exercises.length - 1}
                     className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20"
-                  >
-                    ↓
-                  </button>
+                  >↓</button>
                 </div>
                 <button
                   onClick={() => deleteExercise(ex.id)}
                   className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
-                >
-                  ✕
-                </button>
+                >✕</button>
               </div>
             </div>
           </div>
@@ -241,40 +239,32 @@ export default function WorkoutDetail({ workout, session, onBack }) {
         </div>
       )}
 
-      {/* MODAL AGGIUNGI ESERCIZIO */}
       {showModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={resetModal}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
             <div className="flex items-center justify-between mb-4">
               <div className="text-white font-black text-2xl tracking-wide">AGGIUNGI ESERCIZIO</div>
-              <button
-                onClick={() => { resetModal(); setShowCustomModal(true) }}
-                className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-3 py-1.5"
-              >
+              <button onClick={() => { resetModal(); setShowCustomModal(true) }}
+                className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-3 py-1.5">
                 ＋ Nuovo
               </button>
             </div>
-
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Esercizio</label>
             <select
               className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
-              value={selectedEx}
-              onChange={e => onSelectExercise(e.target.value)}
+              value={selectedEx} onChange={e => onSelectExercise(e.target.value)}
             >
               <option value="">— Seleziona dalla libreria —</option>
               {getAllExercises().map(ex => (
                 <option key={ex.name} value={ex.name}>{ex.name}{ex.isCustom ? ' ★' : ''}</option>
               ))}
             </select>
-
             {exMachine && (
               <div className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/25 rounded-xl px-4 py-2 mb-3">
-                <span>🟢</span>
-                <span className="text-blue-400 text-sm">{exMachine}</span>
+                <span>🟢</span><span className="text-blue-400 text-sm">{exMachine}</span>
               </div>
             )}
-
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div>
                 <label className="text-[#666] text-xs uppercase tracking-widest block mb-2 text-center">Serie</label>
@@ -292,7 +282,6 @@ export default function WorkoutDetail({ workout, session, onBack }) {
                   type="number" min="0" step="2.5" value={defaultKg} onChange={e => setDefaultKg(e.target.value)} />
               </div>
             </div>
-
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Peso per serie</label>
             <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-3 mb-4 space-y-2">
               {kgPerSet.map((kg, i) => (
@@ -308,7 +297,6 @@ export default function WorkoutDetail({ workout, session, onBack }) {
                 </div>
               ))}
             </div>
-
             <button onClick={addExercise} disabled={saving || !selectedEx}
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               {saving ? 'Salvataggio...' : '＋ Aggiungi alla scheda'}
@@ -317,26 +305,21 @@ export default function WorkoutDetail({ workout, session, onBack }) {
         </div>
       )}
 
-      {/* MODAL ESERCIZI PERSONALIZZATI */}
       {showCustomModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowCustomModal(false)}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
             <div className="text-white font-black text-2xl tracking-wide mb-4">ESERCIZI PERSONALIZZATI</div>
-
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome esercizio</label>
             <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
               placeholder="es. Bulgarian Split Squat" value={newExName} onChange={e => setNewExName(e.target.value)} />
-
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Macchinario (opzionale)</label>
             <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
               placeholder="es. Manubri, Bilanciere, Corpo libero" value={newExMachine} onChange={e => setNewExMachine(e.target.value)} />
-
             <button onClick={saveCustomExercise} disabled={savingCustom || !newExName.trim()}
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-5">
               {savingCustom ? 'Salvataggio...' : 'Salva esercizio'}
             </button>
-
             {customExercises.length > 0 && (
               <div>
                 <div className="text-[#666] text-xs uppercase tracking-widest mb-3">I tuoi esercizi</div>
@@ -354,7 +337,6 @@ export default function WorkoutDetail({ workout, session, onBack }) {
                 </div>
               </div>
             )}
-
             <button onClick={() => { setShowCustomModal(false); setShowModal(true) }}
               className="w-full mt-5 py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
               ← Torna alla libreria

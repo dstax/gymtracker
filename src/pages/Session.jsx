@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
-export default function Session({ workout, userSession, onEnd }) {
+export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [exercises, setExercises] = useState([])
   const [currentIdx, setCurrentIdx] = useState(0)
   const [completedSets, setCompletedSets] = useState({})
@@ -79,6 +79,36 @@ export default function Session({ workout, userSession, onEnd }) {
     setShowExerciseList(false)
   }
 
+  function getNextOccurrenceAfterToday(days) {
+    const today = new Date()
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(today)
+      d.setDate(today.getDate() + i)
+      if (days.includes(String(d.getDay()))) {
+        return d.toISOString().split('T')[0]
+      }
+    }
+    const fallback = new Date(today)
+    fallback.setDate(today.getDate() + 7)
+    return fallback.toISOString().split('T')[0]
+  }
+
+  async function clearScheduled() {
+    if (!scheduledId) return
+    const { data } = await supabase
+      .from('scheduled_workouts')
+      .select('is_recurring, recurring_days')
+      .eq('id', scheduledId)
+      .single()
+    if (!data) return
+    if (!data.is_recurring) {
+      await supabase.from('scheduled_workouts').delete().eq('id', scheduledId)
+    } else {
+      const next = getNextOccurrenceAfterToday(data.recurring_days || [])
+      await supabase.from('scheduled_workouts').update({ scheduled_date: next }).eq('id', scheduledId)
+    }
+  }
+
   async function endSession() {
     setSaving(true)
     clearInterval(totalRef.current)
@@ -130,6 +160,7 @@ export default function Session({ workout, userSession, onEnd }) {
       if (setsError) console.error('Errore salvataggio serie:', setsError)
     }
 
+    await clearScheduled()
     setSaving(false)
     onEnd()
   }
@@ -163,9 +194,7 @@ export default function Session({ workout, userSession, onEnd }) {
             <button
               onClick={() => setShowExerciseList(true)}
               className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
-            >
-              ☰
-            </button>
+            >☰</button>
           </div>
         </div>
 
@@ -188,22 +217,16 @@ export default function Session({ workout, userSession, onEnd }) {
 
       {/* ESERCIZIO */}
       <div className="px-5 pt-4 pb-2">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="text-white font-black text-xl">{currentEx.name}</div>
-              {isExerciseCompleted(currentEx) && (
-                <span className="text-green-400 text-sm">✓</span>
-              )}
-            </div>
-            <div className="text-[#666] text-xs mt-1">{currentSets.length} serie</div>
-            {currentEx.machine && (
-              <div className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/25 rounded-lg px-2 py-1 text-blue-400 text-xs mt-2">
-                🟢 {currentEx.machine}
-              </div>
-            )}
-          </div>
+        <div className="flex items-center gap-2">
+          <div className="text-white font-black text-xl">{currentEx.name}</div>
+          {isExerciseCompleted(currentEx) && <span className="text-green-400 text-sm">✓</span>}
         </div>
+        <div className="text-[#666] text-xs mt-1">{currentSets.length} serie</div>
+        {currentEx.machine && (
+          <div className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/25 rounded-lg px-2 py-1 text-blue-400 text-xs mt-2">
+            🟢 {currentEx.machine}
+          </div>
+        )}
       </div>
 
       {/* TABELLA SERIE */}
@@ -257,22 +280,16 @@ export default function Session({ workout, userSession, onEnd }) {
           onClick={() => goTo(currentIdx - 1)}
           disabled={currentIdx === 0}
           className="w-12 py-3 rounded-xl text-sm font-bold bg-[#1a1a1a] border border-[#2a2a2a] text-white disabled:opacity-30"
-        >
-          ←
-        </button>
+        >←</button>
         <button
           onClick={() => setShowExerciseList(true)}
           className="flex-1 py-3 rounded-xl text-sm font-bold bg-[#1a1a1a] border border-[#2a2a2a] text-white"
-        >
-          ☰ {currentIdx + 1} / {exercises.length}
-        </button>
+        >☰ {currentIdx + 1} / {exercises.length}</button>
         <button
           onClick={() => goTo(currentIdx + 1)}
           disabled={currentIdx === exercises.length - 1}
           className="w-12 py-3 rounded-xl text-sm font-bold bg-[#1a1a1a] border border-[#2a2a2a] text-white disabled:opacity-30"
-        >
-          →
-        </button>
+        >→</button>
       </div>
 
       {/* TERMINA */}
@@ -287,9 +304,7 @@ export default function Session({ workout, userSession, onEnd }) {
         <button
           onClick={() => { if (confirm('Abbandonare la sessione?')) onEnd() }}
           className="w-full py-3 rounded-xl text-sm font-semibold bg-red-500/10 border border-red-500/30 text-red-400"
-        >
-          ⚠️ Abbandona sessione
-        </button>
+        >⚠️ Abbandona sessione</button>
       </div>
 
       {/* MODAL LISTA ESERCIZI */}

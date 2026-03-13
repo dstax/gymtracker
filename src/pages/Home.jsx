@@ -10,6 +10,7 @@ export default function Home({ session }) {
   const [profile, setProfile] = useState(null)
   const [scheduled, setScheduled] = useState([])
   const [directWorkout, setDirectWorkout] = useState(null)
+  const [directScheduledId, setDirectScheduledId] = useState(null)
 
   useEffect(() => {
     getProfile()
@@ -56,7 +57,8 @@ export default function Home({ session }) {
         <WorkoutDetail
           workout={directWorkout}
           session={session}
-          onBack={() => { setDirectWorkout(null); setPage('home'); getScheduled() }}
+          scheduledId={directScheduledId}
+          onBack={() => { setDirectWorkout(null); setDirectScheduledId(null); setPage('home'); getScheduled() }}
         />
       </div>
     </div>
@@ -90,7 +92,7 @@ export default function Home({ session }) {
                   {scheduled.map(s => (
                     <div
                       key={s.id}
-                      onClick={() => setDirectWorkout(s.workouts)}
+                      onClick={() => { setDirectWorkout(s.workouts); setDirectScheduledId(s.id) }}
                       className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl cursor-pointer active:scale-[.98] transition-transform"
                     >
                       <div className="flex items-center justify-between">
