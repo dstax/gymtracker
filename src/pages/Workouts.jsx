@@ -23,12 +23,12 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
     fetchWorkouts()
   }, [])
 
-  useEffect(() => {
-    if (initialWorkout && !loading) {
-      setSelectedWorkout(initialWorkout)
-      if (onClearInitial) onClearInitial()
-    }
-  }, [initialWorkout, loading])
+ useEffect(() => {
+  if (initialWorkout) {
+    setSelectedWorkout(initialWorkout)
+    if (onClearInitial) onClearInitial()
+  }
+}, [initialWorkout])
 
   async function fetchWorkouts() {
     const { data } = await supabase
