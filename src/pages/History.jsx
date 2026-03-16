@@ -68,7 +68,7 @@ export default function History({ session }) {
       .from('session_sets')
       .select('*')
       .eq('session_id', sess.id)
-      .order('exercise_name')
+      .order('id', { ascending: true })
     if (data) setDetail(data)
     setLoadingDetail(false)
   }
