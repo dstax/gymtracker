@@ -11,6 +11,13 @@ export default function History({ session }) {
   const [showStats, setShowStats] = useState(false)
   const [globalStats, setGlobalStats] = useState({ totalSessions: 0, totalPRs: 0 })
 
+  // Editing state
+  const [editMode, setEditMode] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editMinutes, setEditMinutes] = useState('')
+  const [editSets, setEditSets] = useState({})
+  const [saving, setSaving] = useState(false)
+
   useEffect(() => {
     fetchSessions()
     fetchGlobalStats()
@@ -55,6 +62,7 @@ export default function History({ session }) {
 
   async function openDetail(sess) {
     setSelected(sess)
+    setEditMode(false)
     setLoadingDetail(true)
     const { data } = await supabase
       .from('session_sets')
@@ -63,6 +71,64 @@ export default function History({ session }) {
       .order('exercise_name')
     if (data) setDetail(data)
     setLoadingDetail(false)
+  }
+
+  function startEdit() {
+    setEditName(selected.workout_name || '')
+    setEditMinutes(Math.floor((selected.duration_seconds || 0) / 60))
+    const vals = {}
+    detail.forEach(s => {
+      vals[s.id] = { reps: s.reps, kg: s.kg }
+    })
+    setEditSets(vals)
+    setEditMode(true)
+  }
+
+  async function saveEdit() {
+    setSaving(true)
+    const newDuration = parseInt(editMinutes) * 60
+
+    // Calcola nuovo volume totale
+    let newVolume = 0
+    detail.forEach(s => {
+      const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
+      newVolume += (parseFloat(val.kg) || 0) * (parseInt(val.reps) || 0)
+    })
+
+    // Aggiorna sessione
+    await supabase.from('sessions').update({
+      workout_name: editName.trim(),
+      duration_seconds: newDuration,
+      total_volume: newVolume
+    }).eq('id', selected.id)
+
+    // Aggiorna ogni serie
+    await Promise.all(detail.map(s => {
+      const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
+      return supabase.from('session_sets').update({
+        reps: parseInt(val.reps) || 0,
+        kg: parseFloat(val.kg) || 0
+      }).eq('id', s.id)
+    }))
+
+    // Ricarica
+    const updatedSession = {
+      ...selected,
+      workout_name: editName.trim(),
+      duration_seconds: newDuration,
+      total_volume: newVolume
+    }
+    setSelected(updatedSession)
+    setSessions(prev => prev.map(s => s.id === selected.id ? updatedSession : s))
+
+    const updatedDetail = detail.map(s => {
+      const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
+      return { ...s, reps: parseInt(val.reps) || 0, kg: parseFloat(val.kg) || 0 }
+    })
+    setDetail(updatedDetail)
+
+    setEditMode(false)
+    setSaving(false)
   }
 
   function fmt(seconds) {
@@ -120,50 +186,144 @@ export default function History({ session }) {
 
   if (selected) return (
     <div className="pt-6">
+      {/* HEADER DETTAGLIO */}
       <div className="flex items-center justify-between mb-4">
-        <button onClick={() => setSelected(null)} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
-        <button
-          onClick={() => deleteSession(selected.id)}
-          className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
-        >
-          🗑
-        </button>
-      </div>
-      <div className="text-[#e8ff47] text-3xl font-black tracking-wide">{selected.workout_name?.toUpperCase()}</div>
-      <div className="text-[#666] text-xs mt-1 capitalize">{formatDate(selected.ended_at)}</div>
-      <div className="grid grid-cols-3 gap-3 mt-4">
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
-          <div className="text-[#e8ff47] font-black text-xl">{fmt(selected.duration_seconds)}</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Durata</div>
-        </div>
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
-          <div className="text-[#e8ff47] font-black text-xl">{(selected.total_volume / 1000).toFixed(1)}t</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Volume</div>
-        </div>
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
-          <div className="text-[#e8ff47] font-black text-xl">{Object.keys(groupByExercise(detail)).length}</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Esercizi</div>
+        <button onClick={() => { setSelected(null); setEditMode(false) }} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
+        <div className="flex items-center gap-2">
+          {!editMode && (
+            <button
+              onClick={startEdit}
+              className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
+            >
+              ✎
+            </button>
+          )}
+          <button
+            onClick={() => deleteSession(selected.id)}
+            className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
+          >
+            🗑
+          </button>
         </div>
       </div>
-      {loadingDetail ? (
-        <div className="mt-4 text-[#666] text-sm">Caricamento dettagli...</div>
-      ) : (
-        <div className="mt-4 space-y-3">
-          {Object.entries(groupByExercise(detail)).map(([exName, sets]) => (
-            <div key={exName} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-              <div className="text-white font-bold mb-2">{exName}</div>
-              <div className="space-y-1">
-                {sets.map((s, i) => (
-                  <div key={s.id} className="flex items-center gap-3 text-sm">
-                    <span className="text-[#444] font-mono text-xs w-4">{i + 1}</span>
-                    <span className="text-white">{s.reps} rip</span>
-                    <span className="text-[#e8ff47] font-mono font-bold">{s.kg} kg</span>
-                    {s.is_pr && <span className="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded px-1.5 py-0.5">PR</span>}
-                  </div>
-                ))}
+
+      {editMode ? (
+        /* MODALITÀ MODIFICA */
+        <div>
+          <div className="text-[#e8ff47] text-xs uppercase tracking-widest mb-4">Modifica sessione</div>
+
+          <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome sessione</label>
+          <input
+            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+          />
+
+          <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Durata (minuti)</label>
+          <input
+            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-5"
+            type="number" min="1"
+            value={editMinutes}
+            onChange={e => setEditMinutes(e.target.value)}
+          />
+
+          <div className="text-[#666] text-xs uppercase tracking-widest mb-3">Serie</div>
+          <div className="space-y-3">
+            {Object.entries(groupByExercise(detail)).map(([exName, sets]) => (
+              <div key={exName} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+                <div className="text-white font-bold mb-3">{exName}</div>
+                <table className="w-full">
+                  <thead>
+                    <tr>
+                      <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-8">Set</th>
+                      <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Kg</th>
+                      <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Rip</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sets.map((s, i) => (
+                      <tr key={s.id} className="border-t border-[#1a1a1a]">
+                        <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
+                        <td className="py-2 text-center">
+                          <input
+                            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                            type="number" step="2.5" min="0"
+                            value={editSets[s.id]?.kg ?? s.kg}
+                            onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], kg: e.target.value } }))}
+                          />
+                        </td>
+                        <td className="py-2 text-center">
+                          <input
+                            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                            type="number" min="1"
+                            value={editSets[s.id]?.reps ?? s.reps}
+                            onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], reps: e.target.value } }))}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
+            ))}
+          </div>
+
+          <div className="mt-5 space-y-3">
+            <button
+              onClick={saveEdit}
+              disabled={saving}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
+            >
+              {saving ? 'Salvataggio...' : '✓ Salva modifiche'}
+            </button>
+            <button
+              onClick={() => setEditMode(false)}
+              className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+            >
+              Annulla
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* MODALITÀ VISUALIZZAZIONE */
+        <div>
+          <div className="text-[#e8ff47] text-3xl font-black tracking-wide">{selected.workout_name?.toUpperCase()}</div>
+          <div className="text-[#666] text-xs mt-1 capitalize">{formatDate(selected.ended_at)}</div>
+          <div className="grid grid-cols-3 gap-3 mt-4">
+            <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
+              <div className="text-[#e8ff47] font-black text-xl">{fmt(selected.duration_seconds)}</div>
+              <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Durata</div>
             </div>
-          ))}
+            <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
+              <div className="text-[#e8ff47] font-black text-xl">{(selected.total_volume / 1000).toFixed(1)}t</div>
+              <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Volume</div>
+            </div>
+            <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
+              <div className="text-[#e8ff47] font-black text-xl">{Object.keys(groupByExercise(detail)).length}</div>
+              <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Esercizi</div>
+            </div>
+          </div>
+          {loadingDetail ? (
+            <div className="mt-4 text-[#666] text-sm">Caricamento dettagli...</div>
+          ) : (
+            <div className="mt-4 space-y-3 mb-6">
+              {Object.entries(groupByExercise(detail)).map(([exName, sets]) => (
+                <div key={exName} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+                  <div className="text-white font-bold mb-2">{exName}</div>
+                  <div className="space-y-1">
+                    {sets.map((s, i) => (
+                      <div key={s.id} className="flex items-center gap-3 text-sm">
+                        <span className="text-[#444] font-mono text-xs w-4">{i + 1}</span>
+                        <span className="text-white">{s.reps} rip</span>
+                        <span className="text-[#e8ff47] font-mono font-bold">{s.kg} kg</span>
+                        {s.is_pr && <span className="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded px-1.5 py-0.5">PR</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
