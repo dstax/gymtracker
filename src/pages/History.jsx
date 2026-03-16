@@ -10,8 +10,6 @@ export default function History({ session }) {
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [globalStats, setGlobalStats] = useState({ totalSessions: 0, totalPRs: 0 })
-
-  // Editing state
   const [editMode, setEditMode] = useState(false)
   const [editName, setEditName] = useState('')
   const [editMinutes, setEditMinutes] = useState('')
@@ -69,8 +67,23 @@ export default function History({ session }) {
       .select('*')
       .eq('session_id', sess.id)
       .order('exercise_order', { ascending: true })
+      .order('set_number', { ascending: true })
     if (data) setDetail(data)
     setLoadingDetail(false)
+  }
+
+  // Raggruppa mantenendo l'ordine di apparizione in base a exercise_order
+  function groupByExerciseOrdered(sets) {
+    const order = []
+    const groups = {}
+    sets.forEach(s => {
+      if (!groups[s.exercise_name]) {
+        groups[s.exercise_name] = []
+        order.push(s.exercise_name)
+      }
+      groups[s.exercise_name].push(s)
+    })
+    return order.map(name => ({ name, sets: groups[name] }))
   }
 
   function startEdit() {
@@ -87,22 +100,18 @@ export default function History({ session }) {
   async function saveEdit() {
     setSaving(true)
     const newDuration = parseInt(editMinutes) * 60
-
-    // Calcola nuovo volume totale
     let newVolume = 0
     detail.forEach(s => {
       const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
       newVolume += (parseFloat(val.kg) || 0) * (parseInt(val.reps) || 0)
     })
 
-    // Aggiorna sessione
     await supabase.from('sessions').update({
       workout_name: editName.trim(),
       duration_seconds: newDuration,
       total_volume: newVolume
     }).eq('id', selected.id)
 
-    // Aggiorna ogni serie
     await Promise.all(detail.map(s => {
       const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
       return supabase.from('session_sets').update({
@@ -111,7 +120,6 @@ export default function History({ session }) {
       }).eq('id', s.id)
     }))
 
-    // Ricarica
     const updatedSession = {
       ...selected,
       workout_name: editName.trim(),
@@ -120,13 +128,10 @@ export default function History({ session }) {
     }
     setSelected(updatedSession)
     setSessions(prev => prev.map(s => s.id === selected.id ? updatedSession : s))
-
-    const updatedDetail = detail.map(s => {
+    setDetail(detail.map(s => {
       const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
       return { ...s, reps: parseInt(val.reps) || 0, kg: parseFloat(val.kg) || 0 }
-    })
-    setDetail(updatedDetail)
-
+    }))
     setEditMode(false)
     setSaving(false)
   }
@@ -143,15 +148,6 @@ export default function History({ session }) {
     return new Date(dateStr).toLocaleDateString('it-IT', {
       weekday: 'long', day: 'numeric', month: 'long'
     })
-  }
-
-  function groupByExercise(sets) {
-    const groups = {}
-    sets.forEach(s => {
-      if (!groups[s.exercise_name]) groups[s.exercise_name] = []
-      groups[s.exercise_name].push(s)
-    })
-    return groups
   }
 
   function exportCSV() {
@@ -186,7 +182,6 @@ export default function History({ session }) {
 
   if (selected) return (
     <div className="pt-6">
-      {/* HEADER DETTAGLIO */}
       <div className="flex items-center justify-between mb-4">
         <button onClick={() => { setSelected(null); setEditMode(false) }} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
         <div className="flex items-center gap-2">
@@ -194,21 +189,16 @@ export default function History({ session }) {
             <button
               onClick={startEdit}
               className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
-            >
-              ✎
-            </button>
+            >✎</button>
           )}
           <button
             onClick={() => deleteSession(selected.id)}
             className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
-          >
-            🗑
-          </button>
+          >🗑</button>
         </div>
       </div>
 
       {editMode ? (
-        /* MODALITÀ MODIFICA */
         <div>
           <div className="text-[#e8ff47] text-xs uppercase tracking-widest mb-4">Modifica sessione</div>
 
@@ -229,9 +219,9 @@ export default function History({ session }) {
 
           <div className="text-[#666] text-xs uppercase tracking-widest mb-3">Serie</div>
           <div className="space-y-3">
-            {Object.entries(groupByExercise(detail)).map(([exName, sets]) => (
-              <div key={exName} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-                <div className="text-white font-bold mb-3">{exName}</div>
+            {groupByExerciseOrdered(detail).map(({ name, sets }) => (
+              <div key={name} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+                <div className="text-white font-bold mb-3">{name}</div>
                 <table className="w-full">
                   <thead>
                     <tr>
@@ -279,13 +269,10 @@ export default function History({ session }) {
             <button
               onClick={() => setEditMode(false)}
               className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
-            >
-              Annulla
-            </button>
+            >Annulla</button>
           </div>
         </div>
       ) : (
-        /* MODALITÀ VISUALIZZAZIONE */
         <div>
           <div className="text-[#e8ff47] text-3xl font-black tracking-wide">{selected.workout_name?.toUpperCase()}</div>
           <div className="text-[#666] text-xs mt-1 capitalize">{formatDate(selected.ended_at)}</div>
@@ -299,7 +286,7 @@ export default function History({ session }) {
               <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Volume</div>
             </div>
             <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
-              <div className="text-[#e8ff47] font-black text-xl">{Object.keys(groupByExercise(detail)).length}</div>
+              <div className="text-[#e8ff47] font-black text-xl">{groupByExerciseOrdered(detail).length}</div>
               <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Esercizi</div>
             </div>
           </div>
@@ -307,9 +294,9 @@ export default function History({ session }) {
             <div className="mt-4 text-[#666] text-sm">Caricamento dettagli...</div>
           ) : (
             <div className="mt-4 space-y-3 mb-6">
-              {Object.entries(groupByExercise(detail)).map(([exName, sets]) => (
-                <div key={exName} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-                  <div className="text-white font-bold mb-2">{exName}</div>
+              {groupByExerciseOrdered(detail).map(({ name, sets }) => (
+                <div key={name} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+                  <div className="text-white font-bold mb-2">{name}</div>
                   <div className="space-y-1">
                     {sets.map((s, i) => (
                       <div key={s.id} className="flex items-center gap-3 text-sm">
@@ -352,13 +339,10 @@ export default function History({ session }) {
           <button
             onClick={() => setShowStats(true)}
             className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl flex items-center justify-center"
-          >
-            📈
-          </button>
+          >📈</button>
         </div>
       </div>
 
-      {/* STATISTICHE GLOBALI */}
       <div className="mt-5 grid grid-cols-2 gap-3">
         <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
           <div className="text-[#e8ff47] font-black text-2xl">{globalStats.totalSessions}</div>
@@ -393,9 +377,7 @@ export default function History({ session }) {
             <button
               onClick={e => { e.stopPropagation(); deleteSession(s.id) }}
               className="absolute top-4 right-4 w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
-            >
-              🗑
-            </button>
+            >🗑</button>
           </div>
         ))}
       </div>
