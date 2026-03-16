@@ -9,6 +9,9 @@ export default function History({ session }) {
   const [detail, setDetail] = useState([])
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [showStats, setShowStats] = useState(false)
+  const [showPRs, setShowPRs] = useState(false)
+  const [prData, setPRData] = useState([])
+  const [loadingPRs, setLoadingPRs] = useState(false)
   const [globalStats, setGlobalStats] = useState({
     totalSessions: 0,
     totalVolume: 0,
@@ -49,7 +52,6 @@ export default function History({ session }) {
     const totalSeconds = data.reduce((sum, s) => sum + (s.duration_seconds || 0), 0)
     const totalHours = totalSeconds / 3600
 
-    // Media sessioni per settimana
     const dates = data.map(s => new Date(s.ended_at)).sort((a, b) => a - b)
     const firstDate = dates[0]
     const lastDate = dates[dates.length - 1]
@@ -62,6 +64,39 @@ export default function History({ session }) {
       totalHours: totalHours.toFixed(1),
       avgPerWeek: avgPerWeek.toFixed(1)
     })
+  }
+
+  async function fetchPRs() {
+    setLoadingPRs(true)
+
+    // Prendo tutte le session_sets dell'utente tramite join
+    const { data } = await supabase
+      .from('session_sets')
+      .select('exercise_name, kg, reps, sessions!inner(user_id)')
+      .eq('sessions.user_id', session.user.id)
+
+    if (!data) { setLoadingPRs(false); return }
+
+    // Raggruppo per esercizio
+    const exercises = {}
+    data.forEach(s => {
+      const name = s.exercise_name
+      if (!exercises[name]) {
+        exercises[name] = { maxKg: 0, totalVolume: 0 }
+      }
+      if ((s.kg || 0) > exercises[name].maxKg) {
+        exercises[name].maxKg = s.kg || 0
+      }
+      exercises[name].totalVolume += (s.kg || 0) * (s.reps || 0)
+    })
+
+    // Converto in array ordinato alfabeticamente
+    const result = Object.entries(exercises)
+      .map(([name, stats]) => ({ name, maxKg: stats.maxKg, totalVolume: stats.totalVolume }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    setPRData(result)
+    setLoadingPRs(false)
   }
 
   async function deleteSession(id) {
@@ -184,6 +219,48 @@ export default function History({ session }) {
     <div className="pt-6">
       <button onClick={() => setShowStats(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Cronologia</button>
       <Stats session={session} />
+    </div>
+  )
+
+  if (showPRs) return (
+    <div className="pt-6">
+      <button onClick={() => setShowPRs(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Cronologia</button>
+      <div className="text-[#e8ff47] text-3xl font-black tracking-wide mb-1">RECORD</div>
+      <div className="text-[#666] text-xs uppercase tracking-widest mb-5">Personal best per esercizio</div>
+
+      {loadingPRs ? (
+        <div className="text-[#666] text-sm">Caricamento...</div>
+      ) : prData.length === 0 ? (
+        <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+          <p className="text-[#666] text-sm">Nessun dato ancora. Completa qualche sessione!</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {prData.map(ex => (
+            <div key={ex.name} className="p-3 bg-[#111] border border-[#2a2a2a] rounded-xl">
+              <div className="text-white font-bold text-sm">{ex.name}</div>
+              <div className="flex gap-4 mt-1.5">
+                {ex.maxKg > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[#666] text-xs uppercase tracking-widest">PR</span>
+                    <span className="text-[#e8ff47] font-mono font-black text-sm">{ex.maxKg} kg</span>
+                  </div>
+                )}
+                {ex.totalVolume > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[#666] text-xs uppercase tracking-widest">Totale</span>
+                    <span className="text-[#60a5fa] font-mono font-bold text-sm">
+                      {ex.totalVolume >= 1000
+                        ? (ex.totalVolume / 1000).toFixed(1) + 't'
+                        : ex.totalVolume + ' kg'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 
@@ -324,8 +401,14 @@ export default function History({ session }) {
             </svg>
           </button>
           <button
+            onClick={() => { setShowPRs(true); fetchPRs() }}
+            className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl flex items-center justify-center"
+            title="Record personali"
+          >🏆</button>
+          <button
             onClick={() => setShowStats(true)}
             className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl flex items-center justify-center"
+            title="Statistiche"
           >📈</button>
         </div>
       </div>
