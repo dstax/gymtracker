@@ -9,7 +9,12 @@ export default function History({ session }) {
   const [detail, setDetail] = useState([])
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [showStats, setShowStats] = useState(false)
-  const [globalStats, setGlobalStats] = useState({ totalSessions: 0, totalPRs: 0 })
+  const [globalStats, setGlobalStats] = useState({
+    totalSessions: 0,
+    totalVolume: 0,
+    totalHours: 0,
+    avgPerWeek: 0
+  })
   const [editMode, setEditMode] = useState(false)
   const [editName, setEditName] = useState('')
   const [editMinutes, setEditMinutes] = useState('')
@@ -32,20 +37,30 @@ export default function History({ session }) {
   }
 
   async function fetchGlobalStats() {
-    const { count: totalSessions } = await supabase
+    const { data } = await supabase
       .from('sessions')
-      .select('*', { count: 'exact', head: true })
+      .select('duration_seconds, total_volume, ended_at')
       .eq('user_id', session.user.id)
 
-    const { count: totalPRs } = await supabase
-      .from('session_sets')
-      .select('session_id, sessions!inner(user_id)', { count: 'exact', head: true })
-      .eq('is_pr', true)
-      .eq('sessions.user_id', session.user.id)
+    if (!data || data.length === 0) return
+
+    const totalSessions = data.length
+    const totalVolume = data.reduce((sum, s) => sum + (s.total_volume || 0), 0)
+    const totalSeconds = data.reduce((sum, s) => sum + (s.duration_seconds || 0), 0)
+    const totalHours = totalSeconds / 3600
+
+    // Media sessioni per settimana
+    const dates = data.map(s => new Date(s.ended_at)).sort((a, b) => a - b)
+    const firstDate = dates[0]
+    const lastDate = dates[dates.length - 1]
+    const weeksDiff = Math.max(1, (lastDate - firstDate) / (1000 * 60 * 60 * 24 * 7))
+    const avgPerWeek = totalSessions / weeksDiff
 
     setGlobalStats({
-      totalSessions: totalSessions || 0,
-      totalPRs: totalPRs || 0
+      totalSessions,
+      totalVolume: (totalVolume / 1000).toFixed(1),
+      totalHours: totalHours.toFixed(1),
+      avgPerWeek: avgPerWeek.toFixed(1)
     })
   }
 
@@ -72,7 +87,6 @@ export default function History({ session }) {
     setLoadingDetail(false)
   }
 
-  // Raggruppa mantenendo l'ordine di apparizione in base a exercise_order
   function groupByExerciseOrdered(sets) {
     const order = []
     const groups = {}
@@ -90,9 +104,7 @@ export default function History({ session }) {
     setEditName(selected.workout_name || '')
     setEditMinutes(Math.floor((selected.duration_seconds || 0) / 60))
     const vals = {}
-    detail.forEach(s => {
-      vals[s.id] = { reps: s.reps, kg: s.kg }
-    })
+    detail.forEach(s => { vals[s.id] = { reps: s.reps, kg: s.kg } })
     setEditSets(vals)
     setEditMode(true)
   }
@@ -120,12 +132,7 @@ export default function History({ session }) {
       }).eq('id', s.id)
     }))
 
-    const updatedSession = {
-      ...selected,
-      workout_name: editName.trim(),
-      duration_seconds: newDuration,
-      total_volume: newVolume
-    }
+    const updatedSession = { ...selected, workout_name: editName.trim(), duration_seconds: newDuration, total_volume: newVolume }
     setSelected(updatedSession)
     setSessions(prev => prev.map(s => s.id === selected.id ? updatedSession : s))
     setDetail(detail.map(s => {
@@ -186,37 +193,25 @@ export default function History({ session }) {
         <button onClick={() => { setSelected(null); setEditMode(false) }} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
         <div className="flex items-center gap-2">
           {!editMode && (
-            <button
-              onClick={startEdit}
-              className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
-            >✎</button>
+            <button onClick={startEdit} className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center">✎</button>
           )}
-          <button
-            onClick={() => deleteSession(selected.id)}
-            className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
-          >🗑</button>
+          <button onClick={() => deleteSession(selected.id)} className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center">🗑</button>
         </div>
       </div>
 
       {editMode ? (
         <div>
           <div className="text-[#e8ff47] text-xs uppercase tracking-widest mb-4">Modifica sessione</div>
-
           <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome sessione</label>
           <input
             className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
-            value={editName}
-            onChange={e => setEditName(e.target.value)}
+            value={editName} onChange={e => setEditName(e.target.value)}
           />
-
           <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Durata (minuti)</label>
           <input
             className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-5"
-            type="number" min="1"
-            value={editMinutes}
-            onChange={e => setEditMinutes(e.target.value)}
+            type="number" min="1" value={editMinutes} onChange={e => setEditMinutes(e.target.value)}
           />
-
           <div className="text-[#666] text-xs uppercase tracking-widest mb-3">Serie</div>
           <div className="space-y-3">
             {groupByExerciseOrdered(detail).map(({ name, sets }) => (
@@ -257,19 +252,11 @@ export default function History({ session }) {
               </div>
             ))}
           </div>
-
           <div className="mt-5 space-y-3">
-            <button
-              onClick={saveEdit}
-              disabled={saving}
-              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
-            >
+            <button onClick={saveEdit} disabled={saving} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               {saving ? 'Salvataggio...' : '✓ Salva modifiche'}
             </button>
-            <button
-              onClick={() => setEditMode(false)}
-              className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
-            >Annulla</button>
+            <button onClick={() => setEditMode(false)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">Annulla</button>
           </div>
         </div>
       ) : (
@@ -343,18 +330,27 @@ export default function History({ session }) {
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3">
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-          <div className="text-[#e8ff47] font-black text-2xl">{globalStats.totalSessions}</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Sessioni totali</div>
+      {/* STATISTICHE GLOBALI 2x2 */}
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalSessions}</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Sessioni</div>
         </div>
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-          <div className="text-green-400 font-black text-2xl">{globalStats.totalPRs}</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">PR storici</div>
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalVolume}t</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Volume tot.</div>
+        </div>
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalHours}h</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Ore palestra</div>
+        </div>
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.avgPerWeek}</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Media/sett.</div>
         </div>
       </div>
 
-      <div className="mt-6 space-y-3">
+      <div className="mt-5 space-y-3">
         {sessions.length === 0 && (
           <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
             <p className="text-[#666] text-sm">Nessuna sessione completata ancora.</p>
