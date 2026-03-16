@@ -9,9 +9,11 @@ export default function History({ session }) {
   const [detail, setDetail] = useState([])
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [showStats, setShowStats] = useState(false)
+  const [globalStats, setGlobalStats] = useState({ totalSessions: 0, totalPRs: 0 })
 
   useEffect(() => {
     fetchSessions()
+    fetchGlobalStats()
   }, [])
 
   async function fetchSessions() {
@@ -24,12 +26,31 @@ export default function History({ session }) {
     setLoading(false)
   }
 
+  async function fetchGlobalStats() {
+    const { count: totalSessions } = await supabase
+      .from('sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', session.user.id)
+
+    const { count: totalPRs } = await supabase
+      .from('session_sets')
+      .select('session_id, sessions!inner(user_id)', { count: 'exact', head: true })
+      .eq('is_pr', true)
+      .eq('sessions.user_id', session.user.id)
+
+    setGlobalStats({
+      totalSessions: totalSessions || 0,
+      totalPRs: totalPRs || 0
+    })
+  }
+
   async function deleteSession(id) {
     if (!confirm('Eliminare questa sessione?')) return
     await supabase.from('session_sets').delete().eq('session_id', id)
     await supabase.from('sessions').delete().eq('id', id)
     setSelected(null)
     fetchSessions()
+    fetchGlobalStats()
   }
 
   async function openDetail(sess) {
@@ -65,6 +86,41 @@ export default function History({ session }) {
       groups[s.exercise_name].push(s)
     })
     return groups
+  }
+
+  function exportCSV() {
+    if (sessions.length === 0) return
+    const rows = [['Data', 'Scheda', 'Durata (min)', 'Volume (kg)']]
+    sessions.forEach(s => {
+      rows.push([
+        new Date(s.ended_at).toLocaleDateString('it-IT'),
+        s.workout_name,
+        Math.floor((s.duration_seconds || 0) / 60),
+        s.total_volume || 0
+      ])
+    })
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'gymtracker_sessioni.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function exportPDF() {
+    const lines = sessions.map(s =>
+      `${new Date(s.ended_at).toLocaleDateString('it-IT')} — ${s.workout_name} — ${Math.floor((s.duration_seconds || 0) / 60)} min — ${((s.total_volume || 0) / 1000).toFixed(1)}t`
+    ).join('\n')
+    const content = `GYMTRACKER — Storico Sessioni\n\n${lines}`
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'gymtracker_sessioni.txt'
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   if (loading) return <div className="pt-8 text-[#666] text-sm">Caricamento...</div>
@@ -141,7 +197,39 @@ export default function History({ session }) {
           📈
         </button>
       </div>
-      <div className="mt-4 space-y-3">
+
+      {/* STATISTICHE GLOBALI */}
+      <div className="mt-5">
+        <div className="text-[#666] text-xs uppercase tracking-widest mb-3">Statistiche globali</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+            <div className="text-[#e8ff47] font-black text-3xl">{globalStats.totalSessions}</div>
+            <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Sessioni totali</div>
+          </div>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+            <div className="text-green-400 font-black text-3xl">{globalStats.totalPRs}</div>
+            <div className="text-[#666] text-xs uppercase tracking-widest mt-1">PR storici</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <button
+            onClick={exportCSV}
+            disabled={sessions.length === 0}
+            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] text-white text-sm font-semibold disabled:opacity-30"
+          >
+            📊 Esporta CSV
+          </button>
+          <button
+            onClick={exportPDF}
+            disabled={sessions.length === 0}
+            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] text-white text-sm font-semibold disabled:opacity-30"
+          >
+            📄 Esporta TXT
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-6 space-y-3">
         {sessions.length === 0 && (
           <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
             <p className="text-[#666] text-sm">Nessuna sessione completata ancora.</p>
