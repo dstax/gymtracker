@@ -109,20 +109,6 @@ export default function History({ session }) {
     URL.revokeObjectURL(url)
   }
 
-  function exportPDF() {
-    const lines = sessions.map(s =>
-      `${new Date(s.ended_at).toLocaleDateString('it-IT')} — ${s.workout_name} — ${Math.floor((s.duration_seconds || 0) / 60)} min — ${((s.total_volume || 0) / 1000).toFixed(1)}t`
-    ).join('\n')
-    const content = `GYMTRACKER — Storico Sessioni\n\n${lines}`
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'gymtracker_sessioni.txt'
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   if (loading) return <div className="pt-8 text-[#666] text-sm">Caricamento...</div>
 
   if (showStats) return (
@@ -190,42 +176,37 @@ export default function History({ session }) {
           <div className="text-[#e8ff47] text-3xl font-black tracking-wide">CRONOLOGIA</div>
           <div className="text-[#666] text-xs uppercase tracking-widest mt-1">{sessions.length} sessioni completate</div>
         </div>
-        <button
-          onClick={() => setShowStats(true)}
-          className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl flex items-center justify-center"
-        >
-          📈
-        </button>
-      </div>
-
-      {/* STATISTICHE GLOBALI */}
-      <div className="mt-5">
-        <div className="text-[#666] text-xs uppercase tracking-widest mb-3">Statistiche globali</div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-            <div className="text-[#e8ff47] font-black text-3xl">{globalStats.totalSessions}</div>
-            <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Sessioni totali</div>
-          </div>
-          <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-            <div className="text-green-400 font-black text-3xl">{globalStats.totalPRs}</div>
-            <div className="text-[#666] text-xs uppercase tracking-widest mt-1">PR storici</div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={exportCSV}
             disabled={sessions.length === 0}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] text-white text-sm font-semibold disabled:opacity-30"
+            className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] flex items-center justify-center disabled:opacity-30"
+            title="Esporta CSV"
           >
-            📊 Esporta CSV
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="3" width="18" height="18" rx="2" fill="#1d6f42"/>
+              <path d="M7 8h2.5M7 12h2.5M7 16h2.5M12 8h5M12 12h5M12 16h5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+              <path d="M10 8v8" stroke="white" strokeWidth="1" opacity="0.4"/>
+            </svg>
           </button>
           <button
-            onClick={exportPDF}
-            disabled={sessions.length === 0}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] text-white text-sm font-semibold disabled:opacity-30"
+            onClick={() => setShowStats(true)}
+            className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl flex items-center justify-center"
           >
-            📄 Esporta TXT
+            📈
           </button>
+        </div>
+      </div>
+
+      {/* STATISTICHE GLOBALI */}
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+          <div className="text-[#e8ff47] font-black text-2xl">{globalStats.totalSessions}</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Sessioni totali</div>
+        </div>
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+          <div className="text-green-400 font-black text-2xl">{globalStats.totalPRs}</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">PR storici</div>
         </div>
       </div>
 
