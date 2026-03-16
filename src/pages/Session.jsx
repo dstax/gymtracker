@@ -117,7 +117,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     let totalVolume = 0
     const sessionSetsToInsert = []
 
-    exercises.forEach(ex => {
+    exercises.forEach((ex, exerciseOrder) => {
       const sortedSets = ex.sets?.sort((a, b) => a.position - b.position) || []
       sortedSets.forEach(s => {
         const val = setValues[s.id] || { reps: s.reps, kg: s.kg }
@@ -127,6 +127,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
         sessionSetsToInsert.push({
           exercise_name: ex.name,
           exercise_id: ex.id,
+          exercise_order: exerciseOrder,
           set_number: s.position + 1,
           reps,
           kg,
