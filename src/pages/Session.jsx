@@ -52,6 +52,35 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     setLoading(false)
   }
 
+  async function fetchHistoricalMaxKg() {
+    // Step 1: recupera gli ID sessioni dell'utente
+    const { data: userSessions } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('user_id', userSession.user.id)
+
+    if (!userSessions || userSessions.length === 0) return {}
+
+    const sessionIds = userSessions.map(s => s.id)
+
+    // Step 2: recupera tutti i set di quelle sessioni
+    const { data } = await supabase
+      .from('session_sets')
+      .select('exercise_name, kg')
+      .in('session_id', sessionIds)
+
+    const maxKg = {}
+    if (data) {
+      data.forEach(s => {
+        const kg = parseFloat(s.kg) || 0
+        if (!maxKg[s.exercise_name] || kg > maxKg[s.exercise_name]) {
+          maxKg[s.exercise_name] = kg
+        }
+      })
+    }
+    return maxKg
+  }
+
   function fmt(s) {
     return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
   }
@@ -115,8 +144,11 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     clearInterval(totalRef.current)
     clearInterval(restRef.current)
 
+    const historicalMax = await fetchHistoricalMaxKg()
+
     let totalVolume = 0
     const sessionSetsToInsert = []
+    const sessionMax = {}
 
     exercises.forEach((ex, exerciseOrder) => {
       const sortedSets = ex.sets?.sort((a, b) => a.position - b.position) || []
@@ -126,6 +158,17 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
         const kg = parseFloat(val.kg) || 0
         const reps = parseInt(val.reps) || 0
         totalVolume += reps * kg
+
+        const prevMax = Math.max(
+          historicalMax[ex.name] || 0,
+          sessionMax[ex.name] || 0
+        )
+        const isPR = kg > 0 && kg > prevMax
+
+        if (kg > (sessionMax[ex.name] || 0)) {
+          sessionMax[ex.name] = kg
+        }
+
         sessionSetsToInsert.push({
           exercise_name: ex.name,
           exercise_id: ex.id,
@@ -134,6 +177,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
           reps,
           kg,
           note,
+          is_pr: isPR,
         })
       })
     })
