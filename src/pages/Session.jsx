@@ -6,6 +6,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [currentIdx, setCurrentIdx] = useState(0)
   const [completedSets, setCompletedSets] = useState({})
   const [setValues, setSetValues] = useState({})
+  const [exerciseNotes, setExerciseNotes] = useState({})
   const [totalSeconds, setTotalSeconds] = useState(0)
   const [restSeconds, setRestSeconds] = useState(0)
   const [restActive, setRestActive] = useState(false)
@@ -119,6 +120,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
     exercises.forEach((ex, exerciseOrder) => {
       const sortedSets = ex.sets?.sort((a, b) => a.position - b.position) || []
+      const note = exerciseNotes[ex.id] || null
       sortedSets.forEach(s => {
         const val = setValues[s.id] || { reps: s.reps, kg: s.kg }
         const kg = parseFloat(val.kg) || 0
@@ -131,6 +133,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
           set_number: s.position + 1,
           reps,
           kg,
+          note,
         })
       })
     })
@@ -275,8 +278,21 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
         </table>
       </div>
 
+      {/* NOTE ESERCIZIO */}
+      <div className="px-5 mt-3">
+        <div className="flex items-center gap-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2">
+          <span className="text-[#444] text-sm flex-shrink-0">📝</span>
+          <input
+            className="flex-1 bg-transparent text-white text-sm outline-none placeholder-[#444]"
+            placeholder="Nota esercizio..."
+            value={exerciseNotes[currentEx.id] || ''}
+            onChange={e => setExerciseNotes(prev => ({ ...prev, [currentEx.id]: e.target.value }))}
+          />
+        </div>
+      </div>
+
       {/* NAVIGAZIONE LIBERA */}
-      <div className="px-5 mt-4 flex gap-3">
+      <div className="px-5 mt-3 flex gap-3">
         <button
           onClick={() => goTo(currentIdx - 1)}
           disabled={currentIdx === 0}
@@ -334,6 +350,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
                     {ex.machine && <div className="text-[#444] text-xs mt-0.5">{ex.machine}</div>}
                   </div>
                   {i === currentIdx && <span className="text-[#e8ff47] text-xs">← qui</span>}
+                  {exerciseNotes[ex.id] && <span className="text-[#666] text-xs">📝</span>}
                 </button>
               ))}
             </div>
