@@ -68,8 +68,6 @@ export default function History({ session }) {
 
   async function fetchPRs() {
     setLoadingPRs(true)
-
-    // Prendo tutte le session_sets dell'utente tramite join
     const { data } = await supabase
       .from('session_sets')
       .select('exercise_name, kg, reps, sessions!inner(user_id)')
@@ -77,20 +75,14 @@ export default function History({ session }) {
 
     if (!data) { setLoadingPRs(false); return }
 
-    // Raggruppo per esercizio
     const exercises = {}
     data.forEach(s => {
       const name = s.exercise_name
-      if (!exercises[name]) {
-        exercises[name] = { maxKg: 0, totalVolume: 0 }
-      }
-      if ((s.kg || 0) > exercises[name].maxKg) {
-        exercises[name].maxKg = s.kg || 0
-      }
+      if (!exercises[name]) exercises[name] = { maxKg: 0, totalVolume: 0 }
+      if ((s.kg || 0) > exercises[name].maxKg) exercises[name].maxKg = s.kg || 0
       exercises[name].totalVolume += (s.kg || 0) * (s.reps || 0)
     })
 
-    // Converto in array ordinato alfabeticamente
     const result = Object.entries(exercises)
       .map(([name, stats]) => ({ name, maxKg: stats.maxKg, totalVolume: stats.totalVolume }))
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -227,7 +219,6 @@ export default function History({ session }) {
       <button onClick={() => setShowPRs(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Cronologia</button>
       <div className="text-[#e8ff47] text-3xl font-black tracking-wide mb-1">RECORD</div>
       <div className="text-[#666] text-xs uppercase tracking-widest mb-5">Personal best per esercizio</div>
-
       {loadingPRs ? (
         <div className="text-[#666] text-sm">Caricamento...</div>
       ) : prData.length === 0 ? (
@@ -250,9 +241,7 @@ export default function History({ session }) {
                   <div className="flex items-center gap-1.5">
                     <span className="text-[#666] text-xs uppercase tracking-widest">Totale</span>
                     <span className="text-[#60a5fa] font-mono font-bold text-sm">
-                      {ex.totalVolume >= 1000
-                        ? (ex.totalVolume / 1000).toFixed(1) + 't'
-                        : ex.totalVolume + ' kg'}
+                      {ex.totalVolume >= 1000 ? (ex.totalVolume / 1000).toFixed(1) + 't' : ex.totalVolume + ' kg'}
                     </span>
                   </div>
                 )}
@@ -358,21 +347,30 @@ export default function History({ session }) {
             <div className="mt-4 text-[#666] text-sm">Caricamento dettagli...</div>
           ) : (
             <div className="mt-4 space-y-3 mb-6">
-              {groupByExerciseOrdered(detail).map(({ name, sets }) => (
-                <div key={name} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-                  <div className="text-white font-bold mb-2">{name}</div>
-                  <div className="space-y-1">
-                    {sets.map((s, i) => (
-                      <div key={s.id} className="flex items-center gap-3 text-sm">
-                        <span className="text-[#444] font-mono text-xs w-4">{i + 1}</span>
-                        <span className="text-white">{s.reps} rip</span>
-                        <span className="text-[#e8ff47] font-mono font-bold">{s.kg} kg</span>
-                        {s.is_pr && <span className="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded px-1.5 py-0.5">PR</span>}
+              {groupByExerciseOrdered(detail).map(({ name, sets }) => {
+                const nota = sets[0]?.note
+                return (
+                  <div key={name} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+                    <div className="text-white font-bold mb-2">{name}</div>
+                    <div className="space-y-1">
+                      {sets.map((s, i) => (
+                        <div key={s.id} className="flex items-center gap-3 text-sm">
+                          <span className="text-[#444] font-mono text-xs w-4">{i + 1}</span>
+                          <span className="text-white">{s.reps} rip</span>
+                          <span className="text-[#e8ff47] font-mono font-bold">{s.kg} kg</span>
+                          {s.is_pr && <span className="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded px-1.5 py-0.5">PR</span>}
+                        </div>
+                      ))}
+                    </div>
+                    {nota && (
+                      <div className="flex items-start gap-2 mt-3 pt-3 border-t border-[#1a1a1a]">
+                        <span className="text-[#444] text-xs mt-0.5">📝</span>
+                        <span className="text-[#888] text-xs italic">{nota}</span>
                       </div>
-                    ))}
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -413,7 +411,6 @@ export default function History({ session }) {
         </div>
       </div>
 
-      {/* STATISTICHE GLOBALI 2x2 */}
       <div className="mt-4 grid grid-cols-2 gap-2">
         <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
           <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalSessions}</div>
