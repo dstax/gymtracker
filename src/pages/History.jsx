@@ -4,6 +4,7 @@ import Stats from './Stats'
 
 export default function History({ session }) {
   const [sessions, setSessions] = useState([])
+  const [sessionPRs, setSessionPRs] = useState({})
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
   const [detail, setDetail] = useState([])
@@ -27,6 +28,7 @@ export default function History({ session }) {
   useEffect(() => {
     fetchSessions()
     fetchGlobalStats()
+    fetchSessionPRs()
   }, [])
 
   async function fetchSessions() {
@@ -37,6 +39,21 @@ export default function History({ session }) {
       .order('ended_at', { ascending: false })
     if (data) setSessions(data)
     setLoading(false)
+  }
+
+  async function fetchSessionPRs() {
+    // Recupera tutti i session_id che hanno almeno un is_pr = true
+    const { data } = await supabase
+      .from('session_sets')
+      .select('session_id, sessions!inner(user_id)')
+      .eq('is_pr', true)
+      .eq('sessions.user_id', session.user.id)
+
+    if (data) {
+      const prMap = {}
+      data.forEach(s => { prMap[s.session_id] = true })
+      setSessionPRs(prMap)
+    }
   }
 
   async function fetchGlobalStats() {
@@ -98,6 +115,7 @@ export default function History({ session }) {
     setSelected(null)
     fetchSessions()
     fetchGlobalStats()
+    fetchSessionPRs()
   }
 
   async function openDetail(sess) {
@@ -444,7 +462,12 @@ export default function History({ session }) {
           >
             <div onClick={() => openDetail(s)}>
               <div className="text-[#666] text-xs uppercase tracking-widest capitalize">{formatDate(s.ended_at)}</div>
-              <div className="text-white font-black text-lg mt-1">{s.workout_name}</div>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="text-white font-black text-lg">{s.workout_name}</div>
+                {sessionPRs[s.id] && (
+                  <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">🏆 PR</span>
+                )}
+              </div>
               <div className="flex gap-4 mt-2">
                 <div className="text-[#666] text-xs">Durata: <span className="text-white font-medium">{fmt(s.duration_seconds)}</span></div>
                 <div className="text-[#666] text-xs">Volume: <span className="text-white font-medium">{(s.total_volume / 1000).toFixed(1)}t</span></div>
