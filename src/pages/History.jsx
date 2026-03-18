@@ -465,8 +465,7 @@ export default function History({ session }) {
               <div className="flex items-center gap-2 mt-1">
                 <div className="text-white font-black text-lg">{s.workout_name}</div>
                 {sessionPRs[s.id] && (
-                  <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">🏆 PR</span>
-                )}
+{s.is_pr && <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">PR</span>}                )}
               </div>
               <div className="flex gap-4 mt-2">
                 <div className="text-[#666] text-xs">Durata: <span className="text-white font-medium">{fmt(s.duration_seconds)}</span></div>
