@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
+const STORAGE_KEY = (workoutId) => `gymtracker_session_${workoutId}`
+
 export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [exercises, setExercises] = useState([])
   const [currentIdx, setCurrentIdx] = useState(0)
@@ -13,6 +15,8 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showExerciseList, setShowExerciseList] = useState(false)
+  const [showResumeModal, setShowResumeModal] = useState(false)
+  const [savedData, setSavedData] = useState(null)
   const totalRef = useRef(null)
   const restRef = useRef(null)
 
@@ -33,6 +37,20 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     return () => clearInterval(restRef.current)
   }, [restActive])
 
+  // Salva stato in localStorage ogni volta che cambia qualcosa di importante
+  useEffect(() => {
+    if (loading || exercises.length === 0) return
+    const state = {
+      completedSets,
+      setValues,
+      exerciseNotes,
+      totalSeconds,
+      currentIdx,
+      savedAt: new Date().toISOString()
+    }
+    localStorage.setItem(STORAGE_KEY(workout.id), JSON.stringify(state))
+  }, [completedSets, setValues, exerciseNotes, totalSeconds, currentIdx])
+
   async function fetchExercises() {
     const { data } = await supabase
       .from('exercises')
@@ -41,19 +59,65 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
       .order('position')
     if (data) {
       setExercises(data)
-      const vals = {}
-      data.forEach(ex => {
-        ex.sets?.sort((a, b) => a.position - b.position).forEach(s => {
-          vals[s.id] = { reps: s.reps, kg: s.kg }
-        })
-      })
-      setSetValues(vals)
+
+      // Controlla se esiste un salvataggio
+      const saved = localStorage.getItem(STORAGE_KEY(workout.id))
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          setSavedData(parsed)
+          setShowResumeModal(true)
+          // Inizializza i valori di default senza sovrascrivere il saved
+          const vals = {}
+          data.forEach(ex => {
+            ex.sets?.sort((a, b) => a.position - b.position).forEach(s => {
+              vals[s.id] = { reps: s.reps, kg: s.kg }
+            })
+          })
+          setSetValues(vals)
+        } catch {
+          localStorage.removeItem(STORAGE_KEY(workout.id))
+          initDefaultValues(data)
+        }
+      } else {
+        initDefaultValues(data)
+      }
     }
     setLoading(false)
   }
 
+  function initDefaultValues(data) {
+    const vals = {}
+    data.forEach(ex => {
+      ex.sets?.sort((a, b) => a.position - b.position).forEach(s => {
+        vals[s.id] = { reps: s.reps, kg: s.kg }
+      })
+    })
+    setSetValues(vals)
+  }
+
+  function resumeSession() {
+    if (!savedData) return
+    setCompletedSets(savedData.completedSets || {})
+    setSetValues(savedData.setValues || {})
+    setExerciseNotes(savedData.exerciseNotes || {})
+    setTotalSeconds(savedData.totalSeconds || 0)
+    setCurrentIdx(savedData.currentIdx || 0)
+    setShowResumeModal(false)
+    setSavedData(null)
+  }
+
+  function discardSaved() {
+    localStorage.removeItem(STORAGE_KEY(workout.id))
+    setShowResumeModal(false)
+    setSavedData(null)
+  }
+
+  function clearStorage() {
+    localStorage.removeItem(STORAGE_KEY(workout.id))
+  }
+
   async function fetchHistoricalMaxKg() {
-    // Step 1: recupera gli ID sessioni dell'utente
     const { data: userSessions } = await supabase
       .from('sessions')
       .select('id')
@@ -63,7 +127,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
     const sessionIds = userSessions.map(s => s.id)
 
-    // Step 2: recupera tutti i set di quelle sessioni
     const { data } = await supabase
       .from('session_sets')
       .select('exercise_name, kg')
@@ -159,15 +222,10 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
         const reps = parseInt(val.reps) || 0
         totalVolume += reps * kg
 
-        const prevMax = Math.max(
-          historicalMax[ex.name] || 0,
-          sessionMax[ex.name] || 0
-        )
+        const prevMax = Math.max(historicalMax[ex.name] || 0, sessionMax[ex.name] || 0)
         const isPR = kg > 0 && kg > prevMax
 
-        if (kg > (sessionMax[ex.name] || 0)) {
-          sessionMax[ex.name] = kg
-        }
+        if (kg > (sessionMax[ex.name] || 0)) sessionMax[ex.name] = kg
 
         sessionSetsToInsert.push({
           exercise_name: ex.name,
@@ -208,9 +266,17 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
       if (setsError) console.error('Errore salvataggio serie:', setsError)
     }
 
+    clearStorage()
     await clearScheduled()
     setSaving(false)
     onEnd()
+  }
+
+  function handleAbandon() {
+    if (confirm('Abbandonare la sessione? I dati non salvati andranno persi.')) {
+      clearStorage()
+      onEnd()
+    }
   }
 
   if (loading) return <div className="pt-8 text-[#666] text-sm px-5">Caricamento...</div>
@@ -229,6 +295,36 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
   return (
     <div className="pt-0 -mx-5">
+
+      {/* MODAL RIPRENDI SESSIONE */}
+      {showResumeModal && savedData && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-3xl w-full max-w-[380px] p-6">
+            <div className="text-2xl mb-2">⚡</div>
+            <div className="text-white font-black text-xl mb-1">Sessione in corso</div>
+            <div className="text-[#666] text-sm mb-1">
+              Hai una sessione non completata di <span className="text-white font-medium">{workout.name}</span>.
+            </div>
+            <div className="text-[#444] text-xs mb-5">
+              Salvata il {new Date(savedData.savedAt).toLocaleString('it-IT')}
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={resumeSession}
+                className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm"
+              >
+                ⚡ Riprendi sessione
+              </button>
+              <button
+                onClick={discardSaved}
+                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+              >
+                Inizia da capo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* HEADER */}
       <div className="bg-[#111] border-b border-[#2a2a2a] px-5 pt-6 pb-4">
@@ -363,7 +459,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
           {saving ? 'Salvataggio in corso...' : '⏹ Termina e Salva'}
         </button>
         <button
-          onClick={() => { if (confirm('Abbandonare la sessione?')) onEnd() }}
+          onClick={handleAbandon}
           className="w-full py-3 rounded-xl text-sm font-semibold bg-red-500/10 border border-red-500/30 text-red-400"
         >⚠️ Abbandona sessione</button>
       </div>
