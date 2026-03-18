@@ -42,7 +42,6 @@ export default function History({ session }) {
   }
 
   async function fetchSessionPRs() {
-    // Recupera tutti i session_id che hanno almeno un is_pr = true
     const { data } = await supabase
       .from('session_sets')
       .select('session_id, sessions!inner(user_id)')
@@ -345,8 +344,13 @@ export default function History({ session }) {
         </div>
       ) : (
         <div>
-          <div className="text-[#e8ff47] text-3xl font-black tracking-wide">{selected.workout_name?.toUpperCase()}</div>
-          <div className="text-[#666] text-xs mt-1 capitalize">{formatDate(selected.ended_at)}</div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="text-[#e8ff47] text-3xl font-black tracking-wide">{selected.workout_name?.toUpperCase()}</div>
+            {sessionPRs[selected.id] && (
+              <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">PR</span>
+            )}
+          </div>
+          <div className="text-[#666] text-xs capitalize">{formatDate(selected.ended_at)}</div>
           <div className="grid grid-cols-3 gap-3 mt-4">
             <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
               <div className="text-[#e8ff47] font-black text-xl">{fmt(selected.duration_seconds)}</div>
@@ -376,7 +380,9 @@ export default function History({ session }) {
                           <span className="text-[#444] font-mono text-xs w-4">{i + 1}</span>
                           <span className="text-white">{s.reps} rip</span>
                           <span className="text-[#e8ff47] font-mono font-bold">{s.kg} kg</span>
-                          {s.is_pr && <span className="text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded px-1.5 py-0.5">PR</span>}
+                          {s.is_pr && (
+                            <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">PR</span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -465,7 +471,8 @@ export default function History({ session }) {
               <div className="flex items-center gap-2 mt-1">
                 <div className="text-white font-black text-lg">{s.workout_name}</div>
                 {sessionPRs[s.id] && (
-{s.is_pr && <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">PR</span>}                )}
+                  <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">🏆 PR</span>
+                )}
               </div>
               <div className="flex gap-4 mt-2">
                 <div className="text-[#666] text-xs">Durata: <span className="text-white font-medium">{fmt(s.duration_seconds)}</span></div>
