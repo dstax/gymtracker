@@ -435,24 +435,20 @@ export default function History({ session }) {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
-          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalSessions}</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest">Sessioni</div>
-        </div>
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
-          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalVolume}t</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest">Volume tot.</div>
-        </div>
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
-          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalHours}h</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest">Ore palestra</div>
-        </div>
-        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
-          <div className="text-[#e8ff47] font-black text-xl">{globalStats.avgPerWeek}</div>
-          <div className="text-[#666] text-xs uppercase tracking-widest">Media/sett.</div>
-        </div>
-      </div>
+<div className="mt-4 grid grid-cols-3 gap-2">
+  <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+    <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalSessions}</div>
+    <div className="text-[#666] text-xs uppercase tracking-widest">Sessioni</div>
+  </div>
+  <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+    <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalVolume}t</div>
+    <div className="text-[#666] text-xs uppercase tracking-widest">Volume</div>
+  </div>
+  <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+    <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalHours}h</div>
+    <div className="text-[#666] text-xs uppercase tracking-widest">Ore</div>
+  </div>
+</div>
 
       <div className="mt-5 space-y-3">
         {sessions.length === 0 && (
