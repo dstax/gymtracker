@@ -406,7 +406,7 @@ export default function History({ session }) {
     <div className="pt-8">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-[#e8ff47] text-3xl font-black tracking-wide">CRONOLOGIA</div>
+          <div className="text-[#e8ff47] text-3xl font-black tracking-wide">STORICO</div>
           <div className="text-[#666] text-xs uppercase tracking-widest mt-1">{sessions.length} sessioni completate</div>
         </div>
         <div className="flex items-center gap-2">
