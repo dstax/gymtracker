@@ -348,7 +348,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
             <div className="text-[#e8ff47] font-black text-2xl tracking-widest">{fmt(totalSeconds)}</div>
           </div>
           <div className={`border rounded-xl p-3 text-center transition-all ${restSeconds >= 120 ? 'bg-orange-500/10 border-orange-500/50 animate-pulse' : restActive ? 'bg-[#1a1a1a] border-[#ff6b35]/50' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}>
-            <div className="text-[#666] text-xs uppercase tracking-widest mb-1">☕ Pausa</div>
+            <div className="text-[#666] text-xs uppercase tracking-widest mb-1">Pausa</div>
             <div className={`font-black text-2xl tracking-widest ${restSeconds >= 120 ? 'text-orange-400' : 'text-[#ff6b35]'}`}>{fmt(restSeconds)}</div>
             <button onClick={resetRest} className="text-[#444] text-xs mt-1">↺ reset</button>
           </div>
