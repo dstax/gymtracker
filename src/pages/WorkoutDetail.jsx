@@ -20,11 +20,11 @@ const DEFAULT_EXERCISES = [
   { name: 'Pectoral Machine', machine: 'Pectoral Machine' },
   { name: 'Plank', machine: 'Corpo libero' },
   { name: 'Pulley', machine: 'Pulley' },
-  { name: 'Row (Macchina)', machine: 'Row (Macchina)' },
+  { name: 'Row Machine', machine: 'Row Machine' },
   { name: 'Shoulder Press', machine: 'Shoulder Press' },
   { name: 'Standing Leg Curl', machine: 'Standing Leg Curl' },
   { name: 'Tricipiti ai Cavi', machine: 'Cavi' },
-  { name: 'Vertical Traction / Lat Machine', machine: 'Vertical Traction / Lat Machine' },
+  { name: 'Lat Machine', machine: 'Lat Machine' },
 ]
 
 export default function WorkoutDetail({ workout, session, onBack, scheduledId }) {
