@@ -37,7 +37,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     return () => clearInterval(restRef.current)
   }, [restActive])
 
-  // Salva stato in localStorage ogni volta che cambia qualcosa di importante
   useEffect(() => {
     if (loading || exercises.length === 0) return
     const state = {
@@ -60,14 +59,12 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     if (data) {
       setExercises(data)
 
-      // Controlla se esiste un salvataggio
       const saved = localStorage.getItem(STORAGE_KEY(workout.id))
       if (saved) {
         try {
           const parsed = JSON.parse(saved)
           setSavedData(parsed)
           setShowResumeModal(true)
-          // Inizializza i valori di default senza sovrascrivere il saved
           const vals = {}
           data.forEach(ex => {
             ex.sets?.sort((a, b) => a.position - b.position).forEach(s => {
@@ -88,12 +85,15 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
   function initDefaultValues(data) {
     const vals = {}
+    const notes = {}
     data.forEach(ex => {
       ex.sets?.sort((a, b) => a.position - b.position).forEach(s => {
         vals[s.id] = { reps: s.reps, kg: s.kg }
       })
+      if (ex.note) notes[ex.id] = ex.note
     })
     setSetValues(vals)
+    setExerciseNotes(notes)
   }
 
   function resumeSession() {
@@ -111,6 +111,8 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     localStorage.removeItem(STORAGE_KEY(workout.id))
     setShowResumeModal(false)
     setSavedData(null)
+    // Reinizializza con le note della scheda
+    initDefaultValues(exercises)
   }
 
   function clearStorage() {
@@ -172,20 +174,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     setShowExerciseList(false)
   }
 
-  function getNextOccurrenceAfterToday(days) {
-    const today = new Date()
-    for (let i = 1; i <= 7; i++) {
-      const d = new Date(today)
-      d.setDate(today.getDate() + i)
-      if (days.includes(String(d.getDay()))) {
-        return d.toISOString().split('T')[0]
-      }
-    }
-    const fallback = new Date(today)
-    fallback.setDate(today.getDate() + 7)
-    return fallback.toISOString().split('T')[0]
-  }
-
   async function clearScheduled() {
     if (!scheduledId) return
     const { data } = await supabase
@@ -197,8 +185,17 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     if (!data.is_recurring) {
       await supabase.from('scheduled_workouts').delete().eq('id', scheduledId)
     } else {
-      const next = getNextOccurrenceAfterToday(data.recurring_days || [])
-      await supabase.from('scheduled_workouts').update({ scheduled_date: next }).eq('id', scheduledId)
+      const today = new Date()
+      for (let i = 1; i <= 7; i++) {
+        const d = new Date(today)
+        d.setDate(today.getDate() + i)
+        if ((data.recurring_days || []).includes(String(d.getDay()))) {
+          await supabase.from('scheduled_workouts').update({
+            scheduled_date: d.toISOString().split('T')[0]
+          }).eq('id', scheduledId)
+          return
+        }
+      }
     }
   }
 
@@ -224,7 +221,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
         const prevMax = Math.max(historicalMax[ex.name] || 0, sessionMax[ex.name] || 0)
         const isPR = kg > 0 && kg > prevMax
-
         if (kg > (sessionMax[ex.name] || 0)) sessionMax[ex.name] = kg
 
         sessionSetsToInsert.push({
@@ -232,10 +228,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
           exercise_id: ex.id,
           exercise_order: exerciseOrder,
           set_number: s.position + 1,
-          reps,
-          kg,
-          note,
-          is_pr: isPR,
+          reps, kg, note, is_pr: isPR,
         })
       })
     })
@@ -250,8 +243,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
         total_volume: totalVolume,
         ended_at: new Date().toISOString()
       })
-      .select()
-      .single()
+      .select().single()
 
     if (error) {
       console.error('Errore salvataggio sessione:', error)
@@ -309,16 +301,10 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
               Salvata il {new Date(savedData.savedAt).toLocaleString('it-IT')}
             </div>
             <div className="space-y-3">
-              <button
-                onClick={resumeSession}
-                className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm"
-              >
+              <button onClick={resumeSession} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm">
                 ⚡ Riprendi sessione
               </button>
-              <button
-                onClick={discardSaved}
-                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
-              >
+              <button onClick={discardSaved} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
                 Inizia da capo
               </button>
             </div>
