@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import WorkoutDetail from './WorkoutDetail'
 
-const DAYS = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab']
-
 export default function Workouts({ session, initialWorkout, onClearInitial, onScheduleUpdate }) {
   const [workouts, setWorkouts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -22,8 +20,13 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
   const [scheduleType, setScheduleType] = useState('single')
   const [scheduleDate, setScheduleDate] = useState('')
   const [multipleDates, setMultipleDates] = useState([])
-  const [recurringDays, setRecurringDays] = useState([])
   const [savingSchedule, setSavingSchedule] = useState(false)
+  const [calYear, setCalYear] = useState(new Date().getFullYear())
+  const [calMonth, setCalMonth] = useState(new Date().getMonth())
+
+  const today = new Date().toISOString().split('T')[0]
+  const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+    'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
 
   useEffect(() => { fetchWorkouts() }, [])
 
@@ -91,7 +94,7 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
         scheduled_date: scheduleDate,
         is_recurring: false
       })
-    } else if (scheduleType === 'multiple') {
+    } else {
       if (multipleDates.length === 0) { setSavingSchedule(false); return }
       await supabase.from('scheduled_workouts').insert(
         multipleDates.map(date => ({
@@ -101,15 +104,6 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
           is_recurring: false
         }))
       )
-    } else {
-      if (recurringDays.length === 0) { setSavingSchedule(false); return }
-      await supabase.from('scheduled_workouts').insert({
-        user_id: session.user.id,
-        workout_id: schedulingWorkout.id,
-        scheduled_date: getNextOccurrence(recurringDays),
-        is_recurring: true,
-        recurring_days: recurringDays
-      })
     }
 
     setSavingSchedule(false)
@@ -117,24 +111,8 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
     setSchedulingWorkout(null)
     setScheduleDate('')
     setMultipleDates([])
-    setRecurringDays([])
     setScheduleType('single')
     if (onScheduleUpdate) onScheduleUpdate()
-  }
-
-  function getNextOccurrence(days) {
-    const today = new Date()
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today)
-      d.setDate(today.getDate() + i)
-      if (days.includes(String(d.getDay()))) return d.toISOString().split('T')[0]
-    }
-    return today.toISOString().split('T')[0]
-  }
-
-  function toggleDay(dayIndex) {
-    const d = String(dayIndex)
-    setRecurringDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d])
   }
 
   function toggleMultipleDate(date) {
@@ -149,20 +127,13 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
     })
   }
 
-  // Genera i giorni del mese corrente per il mini-calendario
   function getCalendarDays(year, month) {
     const firstDay = new Date(year, month, 1).getDay()
     const daysInMonth = new Date(year, month + 1, 0).getDate()
     return { firstDay, daysInMonth }
   }
 
-  const [calYear, setCalYear] = useState(new Date().getFullYear())
-  const [calMonth, setCalMonth] = useState(new Date().getMonth())
-
-  const today = new Date().toISOString().split('T')[0]
   const { firstDay, daysInMonth } = getCalendarDays(calYear, calMonth)
-  const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
-    'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre']
 
   async function deleteWorkout(id) {
     if (!confirm('Eliminare questa scheda?')) return
@@ -295,16 +266,15 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
             <div className="text-[#666] text-xs mb-5">{schedulingWorkout?.name}</div>
 
             {/* TIPO */}
-            <div className="grid grid-cols-3 gap-2 mb-5">
+            <div className="grid grid-cols-2 gap-2 mb-5">
               {[
-                { id: 'single', label: '📅 Singola' },
+                { id: 'single', label: '📅 Data singola' },
                 { id: 'multiple', label: '🗓 Più date' },
-                { id: 'recurring', label: '🔁 Ricorrente' },
               ].map(t => (
                 <button
                   key={t.id}
                   onClick={() => setScheduleType(t.id)}
-                  className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${scheduleType === t.id ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
+                  className={`py-3 rounded-xl text-sm font-bold border transition-all ${scheduleType === t.id ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
                 >
                   {t.label}
                 </button>
@@ -317,9 +287,7 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
                 <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Data allenamento</label>
                 <input
                   className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
-                  type="date"
-                  min={today}
-                  value={scheduleDate}
+                  type="date" min={today} value={scheduleDate}
                   onChange={e => setScheduleDate(e.target.value)}
                 />
               </div>
@@ -329,11 +297,15 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
             {scheduleType === 'multiple' && (
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <button onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1) } else setCalMonth(m => m - 1) }}
-                    className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center">‹</button>
+                  <button
+                    onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1) } else setCalMonth(m => m - 1) }}
+                    className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center"
+                  >‹</button>
                   <span className="text-white text-sm font-bold">{monthNames[calMonth]} {calYear}</span>
-                  <button onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1) } else setCalMonth(m => m + 1) }}
-                    className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center">›</button>
+                  <button
+                    onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1) } else setCalMonth(m => m + 1) }}
+                    className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center"
+                  >›</button>
                 </div>
 
                 <div className="grid grid-cols-7 gap-1 mb-2">
@@ -343,7 +315,6 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
                 </div>
 
                 <div className="grid grid-cols-7 gap-1 mb-4">
-                  {/* Celle vuote prima del primo giorno (settimana inizia da lunedì) */}
                   {Array.from({ length: (firstDay + 6) % 7 }).map((_, i) => (
                     <div key={`empty-${i}`} />
                   ))}
@@ -384,31 +355,9 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
               </div>
             )}
 
-            {/* RICORRENTE */}
-            {scheduleType === 'recurring' && (
-              <div>
-                <label className="text-[#666] text-xs uppercase tracking-widest block mb-3">Giorni della settimana</label>
-                <div className="grid grid-cols-7 gap-1 mb-4">
-                  {DAYS.map((day, i) => (
-                    <button
-                      key={i}
-                      onClick={() => toggleDay(i)}
-                      className={`py-2 rounded-lg text-xs font-bold border transition-all ${recurringDays.includes(String(i)) ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
-                    >
-                      {day}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <button
               onClick={saveSchedule}
-              disabled={savingSchedule || (
-                scheduleType === 'single' ? !scheduleDate :
-                scheduleType === 'multiple' ? multipleDates.length === 0 :
-                recurringDays.length === 0
-              )}
+              disabled={savingSchedule || (scheduleType === 'single' ? !scheduleDate : multipleDates.length === 0)}
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-3"
             >
               {savingSchedule ? 'Salvataggio...' : 'Salva programmazione'}
