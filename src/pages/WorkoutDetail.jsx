@@ -36,6 +36,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   const [sessionActive, setSessionActive] = useState(false)
   const [selectedEx, setSelectedEx] = useState('')
   const [exMachine, setExMachine] = useState('')
+  const [exNote, setExNote] = useState('')
   const [numSets, setNumSets] = useState(3)
   const [reps, setReps] = useState(10)
   const [defaultKg, setDefaultKg] = useState(0)
@@ -44,6 +45,8 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   const [newExName, setNewExName] = useState('')
   const [newExMachine, setNewExMachine] = useState('')
   const [savingCustom, setSavingCustom] = useState(false)
+  const [editingNote, setEditingNote] = useState(null)
+  const [editingNoteValue, setEditingNoteValue] = useState('')
 
   useEffect(() => {
     fetchExercises()
@@ -104,7 +107,13 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     setSaving(true)
     const { data: ex, error } = await supabase
       .from('exercises')
-      .insert({ workout_id: workout.id, name: selectedEx, machine: exMachine, position: exercises.length })
+      .insert({
+        workout_id: workout.id,
+        name: selectedEx,
+        machine: exMachine,
+        position: exercises.length,
+        note: exNote.trim() || null
+      })
       .select().single()
 
     if (!error && ex) {
@@ -116,6 +125,13 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
       fetchExercises()
     }
     setSaving(false)
+  }
+
+  async function saveNote(exId) {
+    await supabase.from('exercises').update({ note: editingNoteValue.trim() || null }).eq('id', exId)
+    setExercises(prev => prev.map(e => e.id === exId ? { ...e, note: editingNoteValue.trim() || null } : e))
+    setEditingNote(null)
+    setEditingNoteValue('')
   }
 
   async function saveCustomExercise() {
@@ -137,7 +153,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   }
 
   function resetModal() {
-    setSelectedEx(''); setExMachine(''); setNumSets(3); setReps(10)
+    setSelectedEx(''); setExMachine(''); setExNote(''); setNumSets(3); setReps(10)
     setDefaultKg(0); setKgPerSet([0, 0, 0]); setShowModal(false)
   }
 
@@ -207,6 +223,31 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                     </div>
                   ))}
                 </div>
+
+                {/* NOTA ESERCIZIO */}
+                {editingNote === ex.id ? (
+                  <div className="flex items-center gap-2 mt-3">
+                    <input
+                      className="flex-1 bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg px-3 py-1.5 text-white text-xs outline-none"
+                      placeholder="Aggiungi nota..."
+                      value={editingNoteValue}
+                      onChange={e => setEditingNoteValue(e.target.value)}
+                      autoFocus
+                    />
+                    <button onClick={() => saveNote(ex.id)} className="w-7 h-7 rounded-lg bg-[#e8ff47] text-black text-xs font-bold flex items-center justify-center">✓</button>
+                    <button onClick={() => { setEditingNote(null); setEditingNoteValue('') }} className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#666] text-xs flex items-center justify-center">✕</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setEditingNote(ex.id); setEditingNoteValue(ex.note || '') }}
+                    className="flex items-center gap-1.5 mt-2"
+                  >
+                    <span className="text-[#444] text-xs">📝</span>
+                    <span className={`text-xs ${ex.note ? 'text-[#888] italic' : 'text-[#444]'}`}>
+                      {ex.note || 'Aggiungi nota...'}
+                    </span>
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-1 ml-2">
                 <div className="flex flex-col gap-1">
@@ -239,6 +280,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
         </div>
       )}
 
+      {/* MODAL AGGIUNGI ESERCIZIO */}
       {showModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={resetModal}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -297,6 +339,13 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                 </div>
               ))}
             </div>
+            <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nota (opzionale)</label>
+            <input
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+              placeholder="es. Presa prona, gomiti stretti..."
+              value={exNote}
+              onChange={e => setExNote(e.target.value)}
+            />
             <button onClick={addExercise} disabled={saving || !selectedEx}
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               {saving ? 'Salvataggio...' : '＋ Aggiungi alla scheda'}
@@ -305,6 +354,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
         </div>
       )}
 
+      {/* MODAL ESERCIZI PERSONALIZZATI */}
       {showCustomModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowCustomModal(false)}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
