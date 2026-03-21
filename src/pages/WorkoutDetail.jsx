@@ -47,6 +47,10 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   const [savingCustom, setSavingCustom] = useState(false)
   const [editingNote, setEditingNote] = useState(null)
   const [editingNoteValue, setEditingNoteValue] = useState('')
+  const [editingCustomEx, setEditingCustomEx] = useState(null)
+  const [editingCustomName, setEditingCustomName] = useState('')
+  const [editingCustomMachine, setEditingCustomMachine] = useState('')
+  const [savingCustomEdit, setSavingCustomEdit] = useState(false)
 
   useEffect(() => {
     fetchExercises()
@@ -146,6 +150,25 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     setSavingCustom(false)
   }
 
+  async function saveCustomExerciseEdit() {
+    if (!editingCustomName.trim() || !editingCustomEx) return
+    setSavingCustomEdit(true)
+    const { error } = await supabase
+      .from('custom_exercises')
+      .update({
+        name: editingCustomName.trim(),
+        machine: editingCustomMachine.trim() || null
+      })
+      .eq('id', editingCustomEx)
+    if (!error) {
+      setEditingCustomEx(null)
+      setEditingCustomName('')
+      setEditingCustomMachine('')
+      fetchCustomExercises()
+    }
+    setSavingCustomEdit(false)
+  }
+
   async function deleteCustomExercise(id) {
     if (!confirm('Eliminare questo esercizio?')) return
     await supabase.from('custom_exercises').delete().eq('id', id)
@@ -224,7 +247,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                   ))}
                 </div>
 
-                {/* NOTA ESERCIZIO */}
                 {editingNote === ex.id ? (
                   <div className="flex items-center gap-2 mt-3">
                     <input
@@ -343,8 +365,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
             <input
               className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
               placeholder="es. Presa prona, gomiti stretti..."
-              value={exNote}
-              onChange={e => setExNote(e.target.value)}
+              value={exNote} onChange={e => setExNote(e.target.value)}
             />
             <button onClick={addExercise} disabled={saving || !selectedEx}
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
@@ -356,7 +377,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
 
       {/* MODAL ESERCIZI PERSONALIZZATI */}
       {showCustomModal && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowCustomModal(false)}>
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => { setShowCustomModal(false); setEditingCustomEx(null) }}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
             <div className="text-white font-black text-2xl tracking-wide mb-4">ESERCIZI PERSONALIZZATI</div>
@@ -370,24 +391,68 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-5">
               {savingCustom ? 'Salvataggio...' : 'Salva esercizio'}
             </button>
+
             {customExercises.length > 0 && (
               <div>
                 <div className="text-[#666] text-xs uppercase tracking-widest mb-3">I tuoi esercizi</div>
                 <div className="space-y-2">
                   {customExercises.map(ex => (
-                    <div key={ex.id} className="flex items-center justify-between p-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl">
-                      <div>
-                        <div className="text-white text-sm font-medium">{ex.name}</div>
-                        {ex.machine && <div className="text-[#666] text-xs mt-0.5">{ex.machine}</div>}
-                      </div>
-                      <button onClick={() => deleteCustomExercise(ex.id)}
-                        className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center ml-2">✕</button>
+                    <div key={ex.id} className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden">
+                      {editingCustomEx === ex.id ? (
+                        <div className="p-3 space-y-2">
+                          <input
+                            className="w-full bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg px-3 py-2 text-white text-sm outline-none"
+                            value={editingCustomName}
+                            onChange={e => setEditingCustomName(e.target.value)}
+                            autoFocus
+                          />
+                          <input
+                            className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-[#666] text-sm outline-none"
+                            placeholder="Macchinario (opzionale)"
+                            value={editingCustomMachine}
+                            onChange={e => setEditingCustomMachine(e.target.value)}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={saveCustomExerciseEdit}
+                              disabled={savingCustomEdit || !editingCustomName.trim()}
+                              className="flex-1 py-2 rounded-lg bg-[#e8ff47] text-black text-xs font-bold disabled:opacity-50"
+                            >
+                              {savingCustomEdit ? 'Salvo...' : '✓ Salva'}
+                            </button>
+                            <button
+                              onClick={() => { setEditingCustomEx(null); setEditingCustomName(''); setEditingCustomMachine('') }}
+                              className="flex-1 py-2 rounded-lg border border-[#2a2a2a] text-[#666] text-xs"
+                            >
+                              Annulla
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between p-3">
+                          <div>
+                            <div className="text-white text-sm font-medium">{ex.name}</div>
+                            {ex.machine && <div className="text-[#666] text-xs mt-0.5">{ex.machine}</div>}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => { setEditingCustomEx(ex.id); setEditingCustomName(ex.name); setEditingCustomMachine(ex.machine || '') }}
+                              className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#111] text-[#666] text-xs flex items-center justify-center"
+                            >✎</button>
+                            <button
+                              onClick={() => deleteCustomExercise(ex.id)}
+                              className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
+                            >✕</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
             )}
-            <button onClick={() => { setShowCustomModal(false); setShowModal(true) }}
+
+            <button onClick={() => { setShowCustomModal(false); setShowModal(true); setEditingCustomEx(null) }}
               className="w-full mt-5 py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
               ← Torna alla libreria
             </button>
