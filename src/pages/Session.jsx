@@ -37,6 +37,26 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     return () => clearInterval(restRef.current)
   }, [restActive])
 
+  // Fix timer in background: calcola il tempo trascorso quando l'app torna in primo piano
+  useEffect(() => {
+    let hiddenAt = null
+
+    function handleVisibilityChange() {
+      if (document.hidden) {
+        hiddenAt = Date.now()
+      } else {
+        if (hiddenAt) {
+          const elapsed = Math.floor((Date.now() - hiddenAt) / 1000)
+          setTotalSeconds(s => s + elapsed)
+          hiddenAt = null
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
+
   useEffect(() => {
     if (loading || exercises.length === 0) return
     const state = {
@@ -111,7 +131,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     localStorage.removeItem(STORAGE_KEY(workout.id))
     setShowResumeModal(false)
     setSavedData(null)
-    // Reinizializza con le note della scheda
     initDefaultValues(exercises)
   }
 
