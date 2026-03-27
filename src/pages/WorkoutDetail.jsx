@@ -33,6 +33,10 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showCustomModal, setShowCustomModal] = useState(false)
+  const [showEditExModal, setShowEditExModal] = useState(false)
+  const [editingEx, setEditingEx] = useState(null)
+  const [editSetValues, setEditSetValues] = useState([])
+  const [savingEditEx, setSavingEditEx] = useState(false)
   const [sessionActive, setSessionActive] = useState(false)
   const [selectedEx, setSelectedEx] = useState('')
   const [exMachine, setExMachine] = useState('')
@@ -95,6 +99,61 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     ))
   }
 
+  function openEditExModal(ex) {
+    setEditingEx(ex)
+    const sorted = ex.sets?.sort((a, b) => a.position - b.position) || []
+    setEditSetValues(sorted.map(s => ({ id: s.id, reps: s.reps, kg: s.kg })))
+    setShowEditExModal(true)
+  }
+
+  async function saveEditEx() {
+    if (!editingEx) return
+    setSavingEditEx(true)
+
+    const currentSets = editingEx.sets?.sort((a, b) => a.position - b.position) || []
+    const newCount = editSetValues.length
+    const oldCount = currentSets.length
+
+    // Aggiorna serie esistenti
+    await Promise.all(editSetValues.slice(0, oldCount).map((sv, i) =>
+      supabase.from('sets').update({ reps: parseInt(sv.reps) || 0, kg: parseFloat(sv.kg) || 0 }).eq('id', currentSets[i].id)
+    ))
+
+    // Aggiungi nuove serie se necessario
+    if (newCount > oldCount) {
+      const toInsert = editSetValues.slice(oldCount).map((sv, i) => ({
+        exercise_id: editingEx.id,
+        reps: parseInt(sv.reps) || 0,
+        kg: parseFloat(sv.kg) || 0,
+        position: oldCount + i
+      }))
+      await supabase.from('sets').insert(toInsert)
+    }
+
+    // Elimina serie in eccesso
+    if (newCount < oldCount) {
+      const toDelete = currentSets.slice(newCount).map(s => s.id)
+      await supabase.from('sets').delete().in('id', toDelete)
+    }
+
+    await fetchExercises()
+    setShowEditExModal(false)
+    setEditingEx(null)
+    setEditSetValues([])
+    setSavingEditEx(false)
+  }
+
+  function addSetToEdit() {
+    const lastKg = editSetValues.length > 0 ? editSetValues[editSetValues.length - 1].kg : 0
+    const lastReps = editSetValues.length > 0 ? editSetValues[editSetValues.length - 1].reps : 10
+    setEditSetValues(prev => [...prev, { id: null, reps: lastReps, kg: lastKg }])
+  }
+
+  function removeSetFromEdit(idx) {
+    if (editSetValues.length <= 1) return
+    setEditSetValues(prev => prev.filter((_, i) => i !== idx))
+  }
+
   function getAllExercises() {
     const custom = customExercises.map(e => ({ name: e.name, machine: e.machine || '', isCustom: true }))
     return [...DEFAULT_EXERCISES, ...custom].sort((a, b) => a.name.localeCompare(b.name))
@@ -155,10 +214,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     setSavingCustomEdit(true)
     const { error } = await supabase
       .from('custom_exercises')
-      .update({
-        name: editingCustomName.trim(),
-        machine: editingCustomMachine.trim() || null
-      })
+      .update({ name: editingCustomName.trim(), machine: editingCustomMachine.trim() || null })
       .eq('id', editingCustomEx)
     if (!error) {
       setEditingCustomEx(null)
@@ -189,12 +245,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   if (loading) return <div className="pt-8 text-[#666] text-sm">Caricamento...</div>
 
   if (sessionActive) return (
-    <Session
-      workout={workout}
-      userSession={session}
-      scheduledId={scheduledId}
-      onEnd={() => setSessionActive(false)}
-    />
+    <Session workout={workout} userSession={session} scheduledId={scheduledId} onEnd={() => setSessionActive(false)} />
   )
 
   return (
@@ -214,9 +265,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
           onClick={() => setSessionActive(true)}
           disabled={exercises.length === 0}
           className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-30"
-        >
-          ▶ Inizia sessione
-        </button>
+        >▶ Inizia sessione</button>
       </div>
 
       <div className="mt-4 space-y-3">
@@ -285,6 +334,10 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                   >↓</button>
                 </div>
                 <button
+                  onClick={() => openEditExModal(ex)}
+                  className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-[#666] text-sm flex items-center justify-center"
+                >✎</button>
+                <button
                   onClick={() => deleteExercise(ex.id)}
                   className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
                 >✕</button>
@@ -299,6 +352,81 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
           <button onClick={() => setShowModal(true)} className="w-full py-3 rounded-xl text-sm font-semibold bg-[#1a1a1a] border border-[#2a2a2a] text-white">
             ＋ Aggiungi esercizio
           </button>
+        </div>
+      )}
+
+      {/* MODAL MODIFICA SERIE ESERCIZIO */}
+      {showEditExModal && editingEx && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => { setShowEditExModal(false); setEditingEx(null) }}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
+            <div className="text-white font-black text-xl tracking-wide mb-1">MODIFICA SERIE</div>
+            <div className="text-[#666] text-xs mb-5">{editingEx.name}</div>
+
+            <table className="w-full mb-3">
+              <thead>
+                <tr>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-8">Set</th>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Kg</th>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Rip</th>
+                  <th className="w-8"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {editSetValues.map((sv, i) => (
+                  <tr key={i} className="border-t border-[#1a1a1a]">
+                    <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
+                    <td className="py-2 text-center">
+                      <input
+                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                        type="number" step="2.5" min="0"
+                        value={sv.kg}
+                        onChange={e => {
+                          const updated = [...editSetValues]
+                          updated[i] = { ...updated[i], kg: e.target.value }
+                          setEditSetValues(updated)
+                        }}
+                      />
+                    </td>
+                    <td className="py-2 text-center">
+                      <input
+                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                        type="number" min="1"
+                        value={sv.reps}
+                        onChange={e => {
+                          const updated = [...editSetValues]
+                          updated[i] = { ...updated[i], reps: e.target.value }
+                          setEditSetValues(updated)
+                        }}
+                      />
+                    </td>
+                    <td className="py-2 text-center">
+                      <button
+                        onClick={() => removeSetFromEdit(i)}
+                        disabled={editSetValues.length <= 1}
+                        className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20"
+                      >✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <button
+              onClick={addSetToEdit}
+              className="w-full py-2 rounded-xl text-sm text-[#e8ff47] border border-[#e8ff47]/30 bg-[#e8ff47]/5 mb-5"
+            >
+              ＋ Aggiungi serie
+            </button>
+
+            <button
+              onClick={saveEditEx}
+              disabled={savingEditEx}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
+            >
+              {savingEditEx ? 'Salvataggio...' : '✓ Salva modifiche'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -413,17 +541,12 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                             onChange={e => setEditingCustomMachine(e.target.value)}
                           />
                           <div className="flex gap-2">
-                            <button
-                              onClick={saveCustomExerciseEdit}
-                              disabled={savingCustomEdit || !editingCustomName.trim()}
-                              className="flex-1 py-2 rounded-lg bg-[#e8ff47] text-black text-xs font-bold disabled:opacity-50"
-                            >
+                            <button onClick={saveCustomExerciseEdit} disabled={savingCustomEdit || !editingCustomName.trim()}
+                              className="flex-1 py-2 rounded-lg bg-[#e8ff47] text-black text-xs font-bold disabled:opacity-50">
                               {savingCustomEdit ? 'Salvo...' : '✓ Salva'}
                             </button>
-                            <button
-                              onClick={() => { setEditingCustomEx(null); setEditingCustomName(''); setEditingCustomMachine('') }}
-                              className="flex-1 py-2 rounded-lg border border-[#2a2a2a] text-[#666] text-xs"
-                            >
+                            <button onClick={() => { setEditingCustomEx(null); setEditingCustomName(''); setEditingCustomMachine('') }}
+                              className="flex-1 py-2 rounded-lg border border-[#2a2a2a] text-[#666] text-xs">
                               Annulla
                             </button>
                           </div>
@@ -435,14 +558,10 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                             {ex.machine && <div className="text-[#666] text-xs mt-0.5">{ex.machine}</div>}
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => { setEditingCustomEx(ex.id); setEditingCustomName(ex.name); setEditingCustomMachine(ex.machine || '') }}
-                              className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#111] text-[#666] text-xs flex items-center justify-center"
-                            >✎</button>
-                            <button
-                              onClick={() => deleteCustomExercise(ex.id)}
-                              className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
-                            >✕</button>
+                            <button onClick={() => { setEditingCustomEx(ex.id); setEditingCustomName(ex.name); setEditingCustomMachine(ex.machine || '') }}
+                              className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#111] text-[#666] text-xs flex items-center justify-center">✎</button>
+                            <button onClick={() => deleteCustomExercise(ex.id)}
+                              className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center">✕</button>
                           </div>
                         </div>
                       )}
