@@ -349,7 +349,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
         <div className="grid grid-cols-2 gap-3 mt-3">
           <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-3 text-center">
-            <div className="text-[#666] text-xs uppercase tracking-widest mb-1">⏱ Totale</div>
+            <div className="text-[#666] text-xs uppercase tracking-widest mb-1">Totale</div>
             <div className="text-[#e8ff47] font-black text-2xl tracking-widest">{fmt(totalSeconds)}</div>
           </div>
           <div className={`border rounded-xl p-3 text-center transition-all ${restSeconds >= 120 ? 'bg-orange-500/10 border-orange-500/50 animate-pulse' : restActive ? 'bg-[#1a1a1a] border-[#ff6b35]/50' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}>
