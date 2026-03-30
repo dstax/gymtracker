@@ -23,6 +23,8 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
   const [savingSchedule, setSavingSchedule] = useState(false)
   const [calYear, setCalYear] = useState(new Date().getFullYear())
   const [calMonth, setCalMonth] = useState(new Date().getMonth())
+  const [existingSchedules, setExistingSchedules] = useState([])
+  const [scheduleTab, setScheduleTab] = useState('new') // 'new' | 'existing'
 
   const today = new Date().toISOString().split('T')[0]
   const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
@@ -47,6 +49,33 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
     setLoading(false)
   }
 
+  async function fetchExistingSchedules(workoutId) {
+    const { data } = await supabase
+      .from('scheduled_workouts')
+      .select('*')
+      .eq('workout_id', workoutId)
+      .eq('user_id', session.user.id)
+      .gte('scheduled_date', today)
+      .order('scheduled_date', { ascending: true })
+    if (data) setExistingSchedules(data)
+  }
+
+  async function deleteSchedule(id) {
+    await supabase.from('scheduled_workouts').delete().eq('id', id)
+    if (schedulingWorkout) fetchExistingSchedules(schedulingWorkout.id)
+    if (onScheduleUpdate) onScheduleUpdate()
+  }
+
+  function openScheduleModal(workout) {
+    setSchedulingWorkout(workout)
+    setScheduleTab('new')
+    setScheduleType('single')
+    setScheduleDate('')
+    setMultipleDates([])
+    fetchExistingSchedules(workout.id)
+    setShowScheduleModal(true)
+  }
+
   async function createWorkout() {
     if (!newName.trim()) return
     setSaving(true)
@@ -61,8 +90,7 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
       setNewMuscles('')
       setShowModal(false)
       fetchWorkouts()
-      setSchedulingWorkout(data)
-      setShowScheduleModal(true)
+      openScheduleModal(data)
     }
     setSaving(false)
   }
@@ -107,11 +135,11 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
     }
 
     setSavingSchedule(false)
-    setShowScheduleModal(false)
-    setSchedulingWorkout(null)
     setScheduleDate('')
     setMultipleDates([])
     setScheduleType('single')
+    setScheduleTab('existing')
+    fetchExistingSchedules(schedulingWorkout.id)
     if (onScheduleUpdate) onScheduleUpdate()
   }
 
@@ -124,6 +152,12 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
   function formatDateShort(dateStr) {
     return new Date(dateStr + 'T00:00:00').toLocaleDateString('it-IT', {
       day: 'numeric', month: 'short'
+    })
+  }
+
+  function formatDateFull(dateStr) {
+    return new Date(dateStr + 'T00:00:00').toLocaleDateString('it-IT', {
+      weekday: 'long', day: 'numeric', month: 'long'
     })
   }
 
@@ -186,7 +220,7 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
                   className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
                 >✎</button>
                 <button
-                  onClick={e => { e.stopPropagation(); setSchedulingWorkout(w); setShowScheduleModal(true) }}
+                  onClick={e => { e.stopPropagation(); openScheduleModal(w) }}
                   className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
                 >📅</button>
                 <button
@@ -265,109 +299,157 @@ export default function Workouts({ session, initialWorkout, onClearInitial, onSc
             <div className="text-white font-black text-2xl tracking-wide mb-1">PROGRAMMA</div>
             <div className="text-[#666] text-xs mb-5">{schedulingWorkout?.name}</div>
 
-            {/* TIPO */}
+            {/* TAB */}
             <div className="grid grid-cols-2 gap-2 mb-5">
-              {[
-                { id: 'single', label: '📅 Data singola' },
-                { id: 'multiple', label: '🗓 Più date' },
-              ].map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setScheduleType(t.id)}
-                  className={`py-3 rounded-xl text-sm font-bold border transition-all ${scheduleType === t.id ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
-                >
-                  {t.label}
-                </button>
-              ))}
+              <button
+                onClick={() => setScheduleTab('new')}
+                className={`py-2.5 rounded-xl text-sm font-bold border transition-all ${scheduleTab === 'new' ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
+              >＋ Aggiungi date</button>
+              <button
+                onClick={() => setScheduleTab('existing')}
+                className={`py-2.5 rounded-xl text-sm font-bold border transition-all ${scheduleTab === 'existing' ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
+              >
+                📋 Programmate {existingSchedules.length > 0 && `(${existingSchedules.length})`}
+              </button>
             </div>
 
-            {/* DATA SINGOLA */}
-            {scheduleType === 'single' && (
+            {/* TAB: DATE ESISTENTI */}
+            {scheduleTab === 'existing' && (
               <div>
-                <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Data allenamento</label>
-                <input
-                  className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
-                  type="date" min={today} value={scheduleDate}
-                  onChange={e => setScheduleDate(e.target.value)}
-                />
-              </div>
-            )}
-
-            {/* PIÙ DATE — MINI CALENDARIO */}
-            {scheduleType === 'multiple' && (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <button
-                    onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1) } else setCalMonth(m => m - 1) }}
-                    className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center"
-                  >‹</button>
-                  <span className="text-white text-sm font-bold">{monthNames[calMonth]} {calYear}</span>
-                  <button
-                    onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1) } else setCalMonth(m => m + 1) }}
-                    className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center"
-                  >›</button>
-                </div>
-
-                <div className="grid grid-cols-7 gap-1 mb-2">
-                  {['L', 'M', 'M', 'G', 'V', 'S', 'D'].map((d, i) => (
-                    <div key={i} className="text-[#444] text-xs text-center py-1">{d}</div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-7 gap-1 mb-4">
-                  {Array.from({ length: (firstDay + 6) % 7 }).map((_, i) => (
-                    <div key={`empty-${i}`} />
-                  ))}
-                  {Array.from({ length: daysInMonth }).map((_, i) => {
-                    const day = i + 1
-                    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-                    const isPast = dateStr < today
-                    const isSelected = multipleDates.includes(dateStr)
-                    return (
-                      <button
-                        key={day}
-                        onClick={() => !isPast && toggleMultipleDate(dateStr)}
-                        disabled={isPast}
-                        className={`aspect-square rounded-lg text-xs font-bold transition-all ${isSelected ? 'bg-[#e8ff47] text-black' : isPast ? 'text-[#333]' : 'text-white hover:bg-[#2a2a2a]'}`}
-                      >
-                        {day}
-                      </button>
-                    )
-                  })}
-                </div>
-
-                {multipleDates.length > 0 && (
-                  <div className="mb-4">
-                    <div className="text-[#666] text-xs uppercase tracking-widest mb-2">{multipleDates.length} date selezionate</div>
-                    <div className="flex flex-wrap gap-2">
-                      {multipleDates.map(d => (
-                        <span
-                          key={d}
-                          onClick={() => toggleMultipleDate(d)}
-                          className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-2 py-1 cursor-pointer"
-                        >
-                          {formatDateShort(d)} ✕
-                        </span>
-                      ))}
-                    </div>
+                {existingSchedules.length === 0 ? (
+                  <div className="p-4 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl text-center">
+                    <p className="text-[#666] text-sm">Nessuna data programmata.</p>
+                    <button onClick={() => setScheduleTab('new')} className="text-[#e8ff47] text-xs mt-2">＋ Aggiungi date</button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {existingSchedules.map(s => (
+                      <div key={s.id} className="flex items-center justify-between p-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl">
+                        <div>
+                          <div className="text-white text-sm font-medium capitalize">{formatDateFull(s.scheduled_date)}</div>
+                        </div>
+                        <button
+                          onClick={() => deleteSchedule(s.id)}
+                          className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center ml-2"
+                        >🗑</button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             )}
 
-            <button
-              onClick={saveSchedule}
-              disabled={savingSchedule || (scheduleType === 'single' ? !scheduleDate : multipleDates.length === 0)}
-              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-3"
-            >
-              {savingSchedule ? 'Salvataggio...' : 'Salva programmazione'}
-            </button>
+            {/* TAB: AGGIUNGI DATE */}
+            {scheduleTab === 'new' && (
+              <div>
+                <div className="grid grid-cols-2 gap-2 mb-5">
+                  {[
+                    { id: 'single', label: '📅 Data singola' },
+                    { id: 'multiple', label: '🗓 Più date' },
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => setScheduleType(t.id)}
+                      className={`py-3 rounded-xl text-sm font-bold border transition-all ${scheduleType === t.id ? 'bg-[#e8ff47] text-black border-[#e8ff47]' : 'bg-[#1a1a1a] text-white border-[#2a2a2a]'}`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {scheduleType === 'single' && (
+                  <div>
+                    <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Data allenamento</label>
+                    <input
+                      className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+                      type="date" min={today} value={scheduleDate}
+                      onChange={e => setScheduleDate(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {scheduleType === 'multiple' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <button
+                        onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1) } else setCalMonth(m => m - 1) }}
+                        className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center"
+                      >‹</button>
+                      <span className="text-white text-sm font-bold">{monthNames[calMonth]} {calYear}</span>
+                      <button
+                        onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1) } else setCalMonth(m => m + 1) }}
+                        className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-sm flex items-center justify-center"
+                      >›</button>
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1 mb-2">
+                      {['L', 'M', 'M', 'G', 'V', 'S', 'D'].map((d, i) => (
+                        <div key={i} className="text-[#444] text-xs text-center py-1">{d}</div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1 mb-4">
+                      {Array.from({ length: (firstDay + 6) % 7 }).map((_, i) => (
+                        <div key={`empty-${i}`} />
+                      ))}
+                      {Array.from({ length: daysInMonth }).map((_, i) => {
+                        const day = i + 1
+                        const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                        const isPast = dateStr < today
+                        const isSelected = multipleDates.includes(dateStr)
+                        const isAlreadyScheduled = existingSchedules.some(s => s.scheduled_date === dateStr)
+                        return (
+                          <button
+                            key={day}
+                            onClick={() => !isPast && !isAlreadyScheduled && toggleMultipleDate(dateStr)}
+                            disabled={isPast}
+                            className={`aspect-square rounded-lg text-xs font-bold transition-all ${
+                              isAlreadyScheduled ? 'bg-[#e8ff47]/30 text-[#e8ff47]/50 cursor-not-allowed' :
+                              isSelected ? 'bg-[#e8ff47] text-black' :
+                              isPast ? 'text-[#333]' :
+                              'text-white hover:bg-[#2a2a2a]'
+                            }`}
+                          >
+                            {day}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {multipleDates.length > 0 && (
+                      <div className="mb-4">
+                        <div className="text-[#666] text-xs uppercase tracking-widest mb-2">{multipleDates.length} date selezionate</div>
+                        <div className="flex flex-wrap gap-2">
+                          {multipleDates.map(d => (
+                            <span
+                              key={d}
+                              onClick={() => toggleMultipleDate(d)}
+                              className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-2 py-1 cursor-pointer"
+                            >
+                              {formatDateShort(d)} ✕
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  onClick={saveSchedule}
+                  disabled={savingSchedule || (scheduleType === 'single' ? !scheduleDate : multipleDates.length === 0)}
+                  className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-3"
+                >
+                  {savingSchedule ? 'Salvataggio...' : 'Salva programmazione'}
+                </button>
+              </div>
+            )}
 
             <button
               onClick={() => { setShowScheduleModal(false); setSchedulingWorkout(null) }}
-              className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+              className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a] mt-2"
             >
-              Salta per ora
+              Chiudi
             </button>
           </div>
         </div>
