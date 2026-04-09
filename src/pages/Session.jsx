@@ -1,508 +1,575 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import Stats from './Stats'
 
-const STORAGE_KEY = (workoutId) => `gymtracker_session_${workoutId}`
-
-export default function Session({ workout, userSession, onEnd, scheduledId }) {
-  const [exercises, setExercises] = useState([])
-  const [currentIdx, setCurrentIdx] = useState(0)
-  const [completedSets, setCompletedSets] = useState({})
-  const [setValues, setSetValues] = useState({})
-  const [exerciseNotes, setExerciseNotes] = useState({})
-  const [totalSeconds, setTotalSeconds] = useState(0)
-  const [restSeconds, setRestSeconds] = useState(0)
-  const [restActive, setRestActive] = useState(false)
+export default function History({ session }) {
+  const [sessions, setSessions] = useState([])
+  const [sessionPRs, setSessionPRs] = useState({})
   const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState(null)
+  const [detail, setDetail] = useState([])
+  const [loadingDetail, setLoadingDetail] = useState(false)
+  const [showStats, setShowStats] = useState(false)
+  const [showPRs, setShowPRs] = useState(false)
+  const [prData, setPRData] = useState([])
+  const [loadingPRs, setLoadingPRs] = useState(false)
+  const [globalStats, setGlobalStats] = useState({
+    totalSessions: 0,
+    totalVolume: 0,
+    totalHours: 0,
+    avgPerWeek: 0
+  })
+  const [editMode, setEditMode] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editMinutes, setEditMinutes] = useState('')
+  const [editSets, setEditSets] = useState({})
   const [saving, setSaving] = useState(false)
-  const [showExerciseList, setShowExerciseList] = useState(false)
-  const [showResumeModal, setShowResumeModal] = useState(false)
-  const [savedData, setSavedData] = useState(null)
-  const totalRef = useRef(null)
-  const restRef = useRef(null)
+  const [shareCopied, setShareCopied] = useState(false)
 
   useEffect(() => {
-    fetchExercises()
-    totalRef.current = setInterval(() => setTotalSeconds(s => s + 1), 1000)
-    return () => {
-      clearInterval(totalRef.current)
-      clearInterval(restRef.current)
-    }
+    fetchSessions()
+    fetchGlobalStats()
+    fetchSessionPRs()
   }, [])
 
-  useEffect(() => {
-    clearInterval(restRef.current)
-    if (restActive) {
-      restRef.current = setInterval(() => setRestSeconds(s => s + 1), 1000)
-    }
-    return () => clearInterval(restRef.current)
-  }, [restActive])
-
-  // Fix timer in background: calcola il tempo trascorso quando l'app torna in primo piano
-  useEffect(() => {
-    let hiddenAt = null
-
-    function handleVisibilityChange() {
-      if (document.hidden) {
-        hiddenAt = Date.now()
-      } else {
-        if (hiddenAt) {
-          const elapsed = Math.floor((Date.now() - hiddenAt) / 1000)
-          setTotalSeconds(s => s + elapsed)
-          hiddenAt = null
-        }
-      }
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [])
-
-  useEffect(() => {
-    if (loading || exercises.length === 0) return
-    const state = {
-      completedSets,
-      setValues,
-      exerciseNotes,
-      totalSeconds,
-      currentIdx,
-      savedAt: new Date().toISOString()
-    }
-    localStorage.setItem(STORAGE_KEY(workout.id), JSON.stringify(state))
-  }, [completedSets, setValues, exerciseNotes, totalSeconds, currentIdx])
-
-  async function fetchExercises() {
+  async function fetchSessions() {
     const { data } = await supabase
-      .from('exercises')
-      .select('*, sets(*)')
-      .eq('workout_id', workout.id)
-      .order('position')
-    if (data) {
-      setExercises(data)
-
-      const saved = localStorage.getItem(STORAGE_KEY(workout.id))
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved)
-          setSavedData(parsed)
-          setShowResumeModal(true)
-          const vals = {}
-          data.forEach(ex => {
-            ex.sets?.sort((a, b) => a.position - b.position).forEach(s => {
-              vals[s.id] = { reps: s.reps, kg: s.kg }
-            })
-          })
-          setSetValues(vals)
-        } catch {
-          localStorage.removeItem(STORAGE_KEY(workout.id))
-          initDefaultValues(data)
-        }
-      } else {
-        initDefaultValues(data)
-      }
-    }
+      .from('sessions')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('ended_at', { ascending: false })
+    if (data) setSessions(data)
     setLoading(false)
   }
 
-  function initDefaultValues(data) {
-    const vals = {}
-    const notes = {}
-    data.forEach(ex => {
-      ex.sets?.sort((a, b) => a.position - b.position).forEach(s => {
-        vals[s.id] = { reps: s.reps, kg: s.kg }
-      })
-      if (ex.note) notes[ex.id] = ex.note
-    })
-    setSetValues(vals)
-    setExerciseNotes(notes)
-  }
-
-  function resumeSession() {
-    if (!savedData) return
-    setCompletedSets(savedData.completedSets || {})
-    setSetValues(savedData.setValues || {})
-    setExerciseNotes(savedData.exerciseNotes || {})
-    setTotalSeconds(savedData.totalSeconds || 0)
-    setCurrentIdx(savedData.currentIdx || 0)
-    setShowResumeModal(false)
-    setSavedData(null)
-  }
-
-  function discardSaved() {
-    localStorage.removeItem(STORAGE_KEY(workout.id))
-    setShowResumeModal(false)
-    setSavedData(null)
-    initDefaultValues(exercises)
-  }
-
-  function clearStorage() {
-    localStorage.removeItem(STORAGE_KEY(workout.id))
-  }
-
-  async function fetchHistoricalMaxKg() {
-    const { data: userSessions } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('user_id', userSession.user.id)
-
-    if (!userSessions || userSessions.length === 0) return {}
-
-    const sessionIds = userSessions.map(s => s.id)
-
+  async function fetchSessionPRs() {
     const { data } = await supabase
       .from('session_sets')
-      .select('exercise_name, kg')
-      .in('session_id', sessionIds)
+      .select('session_id, sessions!inner(user_id)')
+      .eq('is_pr', true)
+      .eq('sessions.user_id', session.user.id)
 
-    const maxKg = {}
     if (data) {
-      data.forEach(s => {
-        const kg = parseFloat(s.kg) || 0
-        if (!maxKg[s.exercise_name] || kg > maxKg[s.exercise_name]) {
-          maxKg[s.exercise_name] = kg
-        }
-      })
-    }
-    return maxKg
-  }
-
-  function fmt(s) {
-    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
-  }
-
-  function toggleSet(setId) {
-    const isCompleting = !completedSets[setId]
-    setCompletedSets(prev => ({ ...prev, [setId]: !prev[setId] }))
-    if (isCompleting) {
-      setRestSeconds(0)
-      setRestActive(true)
+      const prMap = {}
+      data.forEach(s => { prMap[s.session_id] = true })
+      setSessionPRs(prMap)
     }
   }
 
-  function isExerciseCompleted(ex) {
-    const sets = ex.sets || []
-    return sets.length > 0 && sets.every(s => completedSets[s.id])
-  }
-
-  function resetRest() {
-    setRestSeconds(0)
-    setRestActive(false)
-  }
-
-  function goTo(i) {
-    setCurrentIdx(i)
-    setShowExerciseList(false)
-  }
-
-  async function clearScheduled() {
-    if (!scheduledId) return
+  async function fetchGlobalStats() {
     const { data } = await supabase
-      .from('scheduled_workouts')
-      .select('is_recurring, recurring_days')
-      .eq('id', scheduledId)
-      .single()
-    if (!data) return
-    if (!data.is_recurring) {
-      await supabase.from('scheduled_workouts').delete().eq('id', scheduledId)
-    } else {
-      const today = new Date()
-      for (let i = 1; i <= 7; i++) {
-        const d = new Date(today)
-        d.setDate(today.getDate() + i)
-        if ((data.recurring_days || []).includes(String(d.getDay()))) {
-          await supabase.from('scheduled_workouts').update({
-            scheduled_date: d.toISOString().split('T')[0]
-          }).eq('id', scheduledId)
-          return
-        }
-      }
-    }
+      .from('sessions')
+      .select('duration_seconds, total_volume, ended_at')
+      .eq('user_id', session.user.id)
+
+    if (!data || data.length === 0) return
+
+    const totalSessions = data.length
+    const totalVolume = data.reduce((sum, s) => sum + (s.total_volume || 0), 0)
+    const totalSeconds = data.reduce((sum, s) => sum + (s.duration_seconds || 0), 0)
+    const totalHours = totalSeconds / 3600
+
+    const dates = data.map(s => new Date(s.ended_at)).sort((a, b) => a - b)
+    const firstDate = dates[0]
+    const lastDate = dates[dates.length - 1]
+    const weeksDiff = Math.max(1, (lastDate - firstDate) / (1000 * 60 * 60 * 24 * 7))
+    const avgPerWeek = totalSessions / weeksDiff
+
+    setGlobalStats({
+      totalSessions,
+      totalVolume: (totalVolume / 1000).toFixed(1),
+      totalHours: totalHours.toFixed(1),
+      avgPerWeek: avgPerWeek.toFixed(1)
+    })
   }
 
-  async function endSession() {
-    setSaving(true)
-    clearInterval(totalRef.current)
-    clearInterval(restRef.current)
+  async function fetchPRs() {
+    setLoadingPRs(true)
+    const { data } = await supabase
+      .from('session_sets')
+      .select('exercise_name, kg, reps, sessions!inner(user_id)')
+      .eq('sessions.user_id', session.user.id)
 
-    const historicalMax = await fetchHistoricalMaxKg()
+    if (!data) { setLoadingPRs(false); return }
 
-    let totalVolume = 0
-    const sessionSetsToInsert = []
-    const sessionMax = {}
-
-    exercises.forEach((ex, exerciseOrder) => {
-      const sortedSets = ex.sets?.sort((a, b) => a.position - b.position) || []
-      const note = exerciseNotes[ex.id] || null
-      sortedSets.forEach(s => {
-        const val = setValues[s.id] || { reps: s.reps, kg: s.kg }
-        const kg = parseFloat(val.kg) || 0
-        const reps = parseInt(val.reps) || 0
-        totalVolume += reps * kg
-
-        const prevMax = Math.max(historicalMax[ex.name] || 0, sessionMax[ex.name] || 0)
-        const isPR = kg > 0 && kg > prevMax
-        if (kg > (sessionMax[ex.name] || 0)) sessionMax[ex.name] = kg
-
-        sessionSetsToInsert.push({
-          exercise_name: ex.name,
-          exercise_id: ex.id,
-          exercise_order: exerciseOrder,
-          set_number: s.position + 1,
-          reps, kg, note, is_pr: isPR,
-        })
-      })
+    const exercises = {}
+    data.forEach(s => {
+      const name = s.exercise_name
+      if (!exercises[name]) exercises[name] = { maxKg: 0, totalVolume: 0 }
+      if ((s.kg || 0) > exercises[name].maxKg) exercises[name].maxKg = s.kg || 0
+      exercises[name].totalVolume += (s.kg || 0) * (s.reps || 0)
     })
 
-    const { data: sess, error } = await supabase
-      .from('sessions')
-      .insert({
-        user_id: userSession.user.id,
-        workout_id: workout.id,
-        workout_name: workout.name,
-        duration_seconds: totalSeconds,
-        total_volume: totalVolume,
-        ended_at: new Date().toISOString()
-      })
-      .select().single()
+    const result = Object.entries(exercises)
+      .map(([name, stats]) => ({ name, maxKg: stats.maxKg, totalVolume: stats.totalVolume }))
+      .sort((a, b) => a.name.localeCompare(b.name))
 
-    if (error) {
-      console.error('Errore salvataggio sessione:', error)
-      setSaving(false)
-      return
-    }
+    setPRData(result)
+    setLoadingPRs(false)
+  }
 
-    if (sess && sessionSetsToInsert.length > 0) {
-      const { error: setsError } = await supabase
-        .from('session_sets')
-        .insert(sessionSetsToInsert.map(s => ({ ...s, session_id: sess.id })))
-      if (setsError) console.error('Errore salvataggio serie:', setsError)
-    }
+  async function deleteSession(id) {
+    if (!confirm('Eliminare questa sessione?')) return
+    await supabase.from('session_sets').delete().eq('session_id', id)
+    await supabase.from('sessions').delete().eq('id', id)
+    setSelected(null)
+    fetchSessions()
+    fetchGlobalStats()
+    fetchSessionPRs()
+  }
 
-    clearStorage()
-    await clearScheduled()
+  async function openDetail(sess) {
+    setSelected(sess)
+    setEditMode(false)
+    setLoadingDetail(true)
+    const { data } = await supabase
+      .from('session_sets')
+      .select('*')
+      .eq('session_id', sess.id)
+      .order('exercise_order', { ascending: true })
+      .order('set_number', { ascending: true })
+    if (data) setDetail(data)
+    setLoadingDetail(false)
+  }
+
+  function groupByExerciseOrdered(sets) {
+    const order = []
+    const groups = {}
+    sets.forEach(s => {
+      if (!groups[s.exercise_name]) {
+        groups[s.exercise_name] = []
+        order.push(s.exercise_name)
+      }
+      groups[s.exercise_name].push(s)
+    })
+    return order.map(name => ({ name, sets: groups[name] }))
+  }
+
+  function startEdit() {
+    setEditName(selected.workout_name || '')
+    setEditMinutes(Math.floor((selected.duration_seconds || 0) / 60))
+    const vals = {}
+    detail.forEach(s => { vals[s.id] = { reps: s.reps, kg: s.kg } })
+    setEditSets(vals)
+    setEditMode(true)
+  }
+
+  async function saveEdit() {
+    setSaving(true)
+    const newDuration = parseInt(editMinutes) * 60
+    let newVolume = 0
+    detail.forEach(s => {
+      const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
+      newVolume += (parseFloat(val.kg) || 0) * (parseInt(val.reps) || 0)
+    })
+
+    await supabase.from('sessions').update({
+      workout_name: editName.trim(),
+      duration_seconds: newDuration,
+      total_volume: newVolume
+    }).eq('id', selected.id)
+
+    await Promise.all(detail.map(s => {
+      const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
+      return supabase.from('session_sets').update({
+        reps: parseInt(val.reps) || 0,
+        kg: parseFloat(val.kg) || 0
+      }).eq('id', s.id)
+    }))
+
+    const updatedSession = { ...selected, workout_name: editName.trim(), duration_seconds: newDuration, total_volume: newVolume }
+    setSelected(updatedSession)
+    setSessions(prev => prev.map(s => s.id === selected.id ? updatedSession : s))
+    setDetail(detail.map(s => {
+      const val = editSets[s.id] || { reps: s.reps, kg: s.kg }
+      return { ...s, reps: parseInt(val.reps) || 0, kg: parseFloat(val.kg) || 0 }
+    }))
+    setEditMode(false)
     setSaving(false)
-    onEnd()
   }
 
-  function handleAbandon() {
-    if (confirm('Abbandonare la sessione? I dati non salvati andranno persi.')) {
-      clearStorage()
-      onEnd()
+  function fmt(seconds) {
+    if (!seconds) return '—'
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m}m ${s}s`
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '—'
+    return new Date(dateStr).toLocaleDateString('it-IT', {
+      weekday: 'long', day: 'numeric', month: 'long'
+    })
+  }
+
+  function exportCSV() {
+    if (sessions.length === 0) return
+    const rows = [['Data', 'Scheda', 'Durata (min)', 'Volume (kg)']]
+    sessions.forEach(s => {
+      rows.push([
+        new Date(s.ended_at).toLocaleDateString('it-IT'),
+        s.workout_name,
+        Math.floor((s.duration_seconds || 0) / 60),
+        s.total_volume || 0
+      ])
+    })
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'gymtracker_sessioni.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function buildSessionText(sess, detailSets) {
+    const date = new Date(sess.ended_at).toLocaleDateString('it-IT', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    })
+    const duration = fmt(sess.duration_seconds)
+    const volume = sess.total_volume >= 1000
+      ? (sess.total_volume / 1000).toFixed(1) + 't'
+      : sess.total_volume + ' kg'
+    const hasPR = sessionPRs[sess.id]
+
+    let text = `🏋️ *${sess.workout_name?.toUpperCase()}*\n`
+    text += `📅 ${date}\n`
+    text += `⏱ Durata: ${duration}   📦 Volume: ${volume}\n`
+    if (hasPR) text += `🏆 Sessione con nuovo PR!\n`
+    text += `\n`
+
+    const grouped = groupByExerciseOrdered(detailSets)
+    grouped.forEach(({ name, sets }) => {
+      text += `*${name}*\n`
+      sets.forEach((s, i) => {
+        const prTag = s.is_pr ? ' 🏆 PR' : ''
+        text += `  Set ${i + 1}: ${s.reps} rip × ${s.kg} kg${prTag}\n`
+      })
+      const nota = sets[0]?.note
+      if (nota) text += `  📝 _${nota}_\n`
+      text += `\n`
+    })
+
+    text += `— Inviato da GymTracker 💪`
+    return text
+  }
+
+  async function shareSession() {
+    const text = buildSessionText(selected, detail)
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ text })
+        return
+      } catch {
+        // fallback a clipboard
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(text)
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2500)
+    } catch {
+      // ultimo fallback: textarea + execCommand
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2500)
     }
   }
 
-  if (loading) return <div className="pt-8 text-[#666] text-sm px-5">Caricamento...</div>
+  if (loading) return <div className="pt-8 text-[#666] text-sm">Caricamento...</div>
 
-  if (exercises.length === 0) return (
-    <div className="pt-8 px-5">
-      <p className="text-[#666]">Nessun esercizio in questa scheda.</p>
-      <button onClick={onEnd} className="mt-4 text-[#e8ff47] text-sm">← Torna indietro</button>
+  if (showStats) return (
+    <div className="pt-6">
+      <button onClick={() => setShowStats(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Cronologia</button>
+      <Stats session={session} />
     </div>
   )
 
-  const currentEx = exercises[currentIdx]
-  const currentSets = currentEx.sets?.sort((a, b) => a.position - b.position) || []
-  const completedCount = exercises.filter(isExerciseCompleted).length
-  const progress = (completedCount / exercises.length) * 100
+  if (showPRs) return (
+    <div className="pt-6">
+      <button onClick={() => setShowPRs(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Cronologia</button>
+      <div className="text-[#e8ff47] text-3xl font-black tracking-wide mb-1">RECORD</div>
+      <div className="text-[#666] text-xs uppercase tracking-widest mb-5">Personal best per esercizio</div>
+      {loadingPRs ? (
+        <div className="text-[#666] text-sm">Caricamento...</div>
+      ) : prData.length === 0 ? (
+        <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+          <p className="text-[#666] text-sm">Nessun dato ancora. Completa qualche sessione!</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {prData.map(ex => (
+            <div key={ex.name} className="p-3 bg-[#111] border border-[#2a2a2a] rounded-xl">
+              <div className="text-white font-bold text-sm">{ex.name}</div>
+              <div className="flex gap-4 mt-1.5">
+                {ex.maxKg > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[#666] text-xs uppercase tracking-widest">PR</span>
+                    <span className="text-[#e8ff47] font-mono font-black text-sm">{ex.maxKg} kg</span>
+                  </div>
+                )}
+                {ex.totalVolume > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[#666] text-xs uppercase tracking-widest">Totale</span>
+                    <span className="text-[#60a5fa] font-mono font-bold text-sm">
+                      {ex.totalVolume >= 1000 ? (ex.totalVolume / 1000).toFixed(1) + 't' : ex.totalVolume + ' kg'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  if (selected) return (
+    <div className="pt-6">
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={() => { setSelected(null); setEditMode(false) }} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
+        <div className="flex items-center gap-2">
+          {!editMode && (
+            <>
+              {/* PULSANTE CONDIVIDI */}
+              <button
+                onClick={shareSession}
+                disabled={loadingDetail}
+                className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center relative"
+                title="Condividi sessione"
+              >
+                {shareCopied
+                  ? <span className="text-green-400 text-xs">✓</span>
+                  : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#888]">
+                      <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                    </svg>
+                }
+              </button>
+              <button onClick={startEdit} className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center">✎</button>
+            </>
+          )}
+          <button onClick={() => deleteSession(selected.id)} className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center">🗑</button>
+        </div>
+      </div>
+
+      {/* TOAST COPIATO */}
+      {shareCopied && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#e8ff47] text-black text-xs font-bold px-4 py-2 rounded-xl shadow-lg">
+          Testo copiato — incollalo su WhatsApp!
+        </div>
+      )}
+
+      {editMode ? (
+        <div>
+          <div className="text-[#e8ff47] text-xs uppercase tracking-widest mb-4">Modifica sessione</div>
+          <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome sessione</label>
+          <input
+            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+            value={editName} onChange={e => setEditName(e.target.value)}
+          />
+          <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Durata (minuti)</label>
+          <input
+            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-5"
+            type="number" min="1" value={editMinutes} onChange={e => setEditMinutes(e.target.value)}
+          />
+          <div className="text-[#666] text-xs uppercase tracking-widest mb-3">Serie</div>
+          <div className="space-y-3">
+            {groupByExerciseOrdered(detail).map(({ name, sets }) => (
+              <div key={name} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+                <div className="text-white font-bold mb-3">{name}</div>
+                <table className="w-full">
+                  <thead>
+                    <tr>
+                      <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-8">Set</th>
+                      <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Kg</th>
+                      <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Rip</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sets.map((s, i) => (
+                      <tr key={s.id} className="border-t border-[#1a1a1a]">
+                        <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
+                        <td className="py-2 text-center">
+                          <input
+                            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                            type="number" step="2.5" min="0"
+                            value={editSets[s.id]?.kg ?? s.kg}
+                            onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], kg: e.target.value } }))}
+                          />
+                        </td>
+                        <td className="py-2 text-center">
+                          <input
+                            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                            type="number" min="1"
+                            value={editSets[s.id]?.reps ?? s.reps}
+                            onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], reps: e.target.value } }))}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 space-y-3">
+            <button onClick={saveEdit} disabled={saving} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
+              {saving ? 'Salvataggio...' : '✓ Salva modifiche'}
+            </button>
+            <button onClick={() => setEditMode(false)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">Annulla</button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="text-[#e8ff47] text-3xl font-black tracking-wide">{selected.workout_name?.toUpperCase()}</div>
+            {sessionPRs[selected.id] && (
+              <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">PR</span>
+            )}
+          </div>
+          <div className="text-[#666] text-xs capitalize">{formatDate(selected.ended_at)}</div>
+          <div className="grid grid-cols-3 gap-3 mt-4">
+            <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
+              <div className="text-[#e8ff47] font-black text-xl">{fmt(selected.duration_seconds)}</div>
+              <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Durata</div>
+            </div>
+            <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
+              <div className="text-[#e8ff47] font-black text-xl">{(selected.total_volume / 1000).toFixed(1)}t</div>
+              <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Volume</div>
+            </div>
+            <div className="bg-[#111] border border-[#2a2a2a] rounded-xl p-3 text-center">
+              <div className="text-[#e8ff47] font-black text-xl">{groupByExerciseOrdered(detail).length}</div>
+              <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Esercizi</div>
+            </div>
+          </div>
+          {loadingDetail ? (
+            <div className="mt-4 text-[#666] text-sm">Caricamento dettagli...</div>
+          ) : (
+            <div className="mt-4 space-y-3 mb-6">
+              {groupByExerciseOrdered(detail).map(({ name, sets }) => {
+                const nota = sets[0]?.note
+                return (
+                  <div key={name} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+                    <div className="text-white font-bold mb-2">{name}</div>
+                    <div className="space-y-1">
+                      {sets.map((s, i) => (
+                        <div key={s.id} className="flex items-center gap-3 text-sm">
+                          <span className="text-[#444] font-mono text-xs w-4">{i + 1}</span>
+                          <span className="text-white">{s.reps} rip</span>
+                          <span className="text-[#e8ff47] font-mono font-bold">{s.kg} kg</span>
+                          {s.is_pr && (
+                            <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">PR</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {nota && (
+                      <div className="flex items-start gap-2 mt-3 pt-3 border-t border-[#1a1a1a]">
+                        <span className="text-[#444] text-xs mt-0.5">📝</span>
+                        <span className="text-[#888] text-xs italic">{nota}</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 
   return (
-    <div className="pt-0 -mx-5">
-
-      {/* MODAL RIPRENDI SESSIONE */}
-      {showResumeModal && savedData && (
-        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
-          <div className="bg-[#111] border border-[#2a2a2a] rounded-3xl w-full max-w-[380px] p-6">
-            <div className="text-2xl mb-2">⚡</div>
-            <div className="text-white font-black text-xl mb-1">Sessione in corso</div>
-            <div className="text-[#666] text-sm mb-1">
-              Hai una sessione non completata di <span className="text-white font-medium">{workout.name}</span>.
-            </div>
-            <div className="text-[#444] text-xs mb-5">
-              Salvata il {new Date(savedData.savedAt).toLocaleString('it-IT')}
-            </div>
-            <div className="space-y-3">
-              <button onClick={resumeSession} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm">
-                ⚡ Riprendi sessione
-              </button>
-              <button onClick={discardSaved} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
-                Inizia da capo
-              </button>
-            </div>
-          </div>
+    <div className="pt-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[#e8ff47] text-3xl font-black tracking-wide">STORICO</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest mt-1">{sessions.length} sessioni completate</div>
         </div>
-      )}
-
-      {/* HEADER */}
-      <div className="bg-[#111] border-b border-[#2a2a2a] px-5 pt-6 pb-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-[#666] text-xs uppercase tracking-widest">In corso</div>
-            <div className="text-white font-black text-xl tracking-wide">{workout.name}</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="text-[#666] text-xs">{completedCount}/{exercises.length} esercizi</div>
-            <button
-              onClick={() => setShowExerciseList(true)}
-              className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
-            >☰</button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 mt-3">
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-3 text-center">
-            <div className="text-[#666] text-xs uppercase tracking-widest mb-1">Totale</div>
-            <div className="text-[#e8ff47] font-black text-2xl tracking-widest">{fmt(totalSeconds)}</div>
-          </div>
-          <div className={`border rounded-xl p-3 text-center transition-all ${restSeconds >= 120 ? 'bg-orange-500/10 border-orange-500/50 animate-pulse' : restActive ? 'bg-[#1a1a1a] border-[#ff6b35]/50' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}>
-            <div className="text-[#666] text-xs uppercase tracking-widest mb-1">Pausa</div>
-            <div className={`font-black text-2xl tracking-widest ${restSeconds >= 120 ? 'text-orange-400' : 'text-[#ff6b35]'}`}>{fmt(restSeconds)}</div>
-            <button onClick={resetRest} className="text-[#444] text-xs mt-1">↺ reset</button>
-          </div>
-        </div>
-
-        <div className="mt-3 h-1 bg-[#222] rounded-full overflow-hidden">
-          <div className="h-full bg-[#e8ff47] rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportCSV}
+            disabled={sessions.length === 0}
+            className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] flex items-center justify-center disabled:opacity-30"
+            title="Esporta CSV"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="3" width="18" height="18" rx="2" fill="#1d6f42"/>
+              <path d="M7 8h2.5M7 12h2.5M7 16h2.5M12 8h5M12 12h5M12 16h5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+              <path d="M10 8v8" stroke="white" strokeWidth="1" opacity="0.4"/>
+            </svg>
+          </button>
+          <button
+            onClick={() => { setShowPRs(true); fetchPRs() }}
+            className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl flex items-center justify-center"
+            title="Record personali"
+          >🏆</button>
+          <button
+            onClick={() => setShowStats(true)}
+            className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-xl flex items-center justify-center"
+            title="Statistiche"
+          >📈</button>
         </div>
       </div>
 
-      {/* ESERCIZIO */}
-      <div className="px-5 pt-4 pb-2">
-        <div className="flex items-center gap-2">
-          <div className="text-white font-black text-xl">{currentEx.name}</div>
-          {isExerciseCompleted(currentEx) && <span className="text-green-400 text-sm">✓</span>}
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalSessions}</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Sessioni</div>
         </div>
-        <div className="text-[#666] text-xs mt-1">{currentSets.length} serie</div>
-        {currentEx.machine && (
-          <div className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/25 rounded-lg px-2 py-1 text-blue-400 text-xs mt-2">
-            🟢 {currentEx.machine}
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalVolume}t</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Volume</div>
+        </div>
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalHours}h</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Ore</div>
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {sessions.length === 0 && (
+          <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+            <p className="text-[#666] text-sm">Nessuna sessione completata ancora.</p>
+            <p className="text-[#444] text-xs mt-1">Completa il tuo primo allenamento per vederlo qui!</p>
           </div>
         )}
-      </div>
-
-      {/* TABELLA SERIE */}
-      <div className="px-5">
-        <table className="w-full">
-          <thead>
-            <tr>
-              <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-8">Set</th>
-              <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Kg</th>
-              <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Rip</th>
-              <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-10">✓</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentSets.map((s, i) => (
-              <tr key={s.id} className={`border-t border-[#1a1a1a] transition-opacity ${completedSets[s.id] ? 'opacity-40' : ''}`}>
-                <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
-                <td className="py-2 text-center">
-                  <input
-                    className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                    type="number" step="2.5" min="0"
-                    value={setValues[s.id]?.kg ?? s.kg}
-                    onChange={e => setSetValues(prev => ({ ...prev, [s.id]: { ...prev[s.id], kg: parseFloat(e.target.value) || 0 } }))}
-                  />
-                </td>
-                <td className="py-2 text-center">
-                  <input
-                    className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                    type="number" min="1"
-                    value={setValues[s.id]?.reps ?? s.reps}
-                    onChange={e => setSetValues(prev => ({ ...prev, [s.id]: { ...prev[s.id], reps: parseInt(e.target.value) || 0 } }))}
-                  />
-                </td>
-                <td className="py-2 text-center">
-                  <button
-                    onClick={() => toggleSet(s.id)}
-                    className={`w-8 h-8 rounded-lg border text-sm flex items-center justify-center mx-auto transition-all ${completedSets[s.id] ? 'bg-[#4ade80] border-[#4ade80] text-black' : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#444]'}`}
-                  >
-                    {completedSets[s.id] ? '✓' : '○'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* NOTE ESERCIZIO */}
-      <div className="px-5 mt-3">
-        <div className="flex items-center gap-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2">
-          <span className="text-[#444] text-sm flex-shrink-0">📝</span>
-          <input
-            className="flex-1 bg-transparent text-white text-sm outline-none placeholder-[#444]"
-            placeholder="Nota esercizio..."
-            value={exerciseNotes[currentEx.id] || ''}
-            onChange={e => setExerciseNotes(prev => ({ ...prev, [currentEx.id]: e.target.value }))}
-          />
-        </div>
-      </div>
-
-      {/* NAVIGAZIONE LIBERA */}
-      <div className="px-5 mt-3 flex gap-3">
-        <button
-          onClick={() => goTo(currentIdx - 1)}
-          disabled={currentIdx === 0}
-          className="w-12 py-3 rounded-xl text-sm font-bold bg-[#1a1a1a] border border-[#2a2a2a] text-white disabled:opacity-30"
-        >←</button>
-        <button
-          onClick={() => setShowExerciseList(true)}
-          className="flex-1 py-3 rounded-xl text-sm font-bold bg-[#1a1a1a] border border-[#2a2a2a] text-white"
-        >☰ {currentIdx + 1} / {exercises.length}</button>
-        <button
-          onClick={() => goTo(currentIdx + 1)}
-          disabled={currentIdx === exercises.length - 1}
-          className="w-12 py-3 rounded-xl text-sm font-bold bg-[#1a1a1a] border border-[#2a2a2a] text-white disabled:opacity-30"
-        >→</button>
-      </div>
-
-      {/* TERMINA */}
-      <div className="px-5 mt-3 mb-6 space-y-3">
-        <button
-          onClick={() => { if (confirm('Salvare e terminare la sessione?')) endSession() }}
-          disabled={saving}
-          className="w-full py-3 rounded-xl text-sm font-bold bg-[#e8ff47] text-black disabled:opacity-50"
-        >
-          {saving ? 'Salvataggio in corso...' : '⏹ Termina e Salva'}
-        </button>
-        <button
-          onClick={handleAbandon}
-          className="w-full py-3 rounded-xl text-sm font-semibold bg-red-500/10 border border-red-500/30 text-red-400"
-        >⚠️ Abbandona sessione</button>
-      </div>
-
-      {/* MODAL LISTA ESERCIZI */}
-      {showExerciseList && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowExerciseList(false)}>
-          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-white font-black text-xl tracking-wide">ESERCIZI</div>
-              <div className="text-[#666] text-xs">{completedCount}/{exercises.length} completati</div>
+        {sessions.map(s => (
+          <div
+            key={s.id}
+            className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl cursor-pointer active:scale-[.98] transition-transform relative"
+          >
+            <div onClick={() => openDetail(s)}>
+              <div className="text-[#666] text-xs uppercase tracking-widest capitalize">{formatDate(s.ended_at)}</div>
+              <div className="flex items-center gap-2 mt-1">
+                <div className="text-white font-black text-lg">{s.workout_name}</div>
+                {sessionPRs[s.id] && (
+                  <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5 font-bold">🏆 PR</span>
+                )}
+              </div>
+              <div className="flex gap-4 mt-2">
+                <div className="text-[#666] text-xs">Durata: <span className="text-white font-medium">{fmt(s.duration_seconds)}</span></div>
+                <div className="text-[#666] text-xs">Volume: <span className="text-white font-medium">{(s.total_volume / 1000).toFixed(1)}t</span></div>
+              </div>
             </div>
-            <div className="space-y-2">
-              {exercises.map((ex, i) => (
-                <button
-                  key={ex.id}
-                  onClick={() => goTo(i)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${i === currentIdx ? 'bg-[#e8ff47]/10 border-[#e8ff47]/30' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}
-                >
-                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${isExerciseCompleted(ex) ? 'bg-[#4ade80] text-black' : i === currentIdx ? 'bg-[#e8ff47] text-black' : 'bg-[#2a2a2a] text-[#666]'}`}>
-                    {isExerciseCompleted(ex) ? '✓' : i + 1}
-                  </div>
-                  <div className="flex-1">
-                    <div className={`text-sm font-bold ${i === currentIdx ? 'text-[#e8ff47]' : isExerciseCompleted(ex) ? 'text-[#666]' : 'text-white'}`}>
-                      {ex.name}
-                    </div>
-                    {ex.machine && <div className="text-[#444] text-xs mt-0.5">{ex.machine}</div>}
-                  </div>
-                  {i === currentIdx && <span className="text-[#e8ff47] text-xs">← qui</span>}
-                  {exerciseNotes[ex.id] && <span className="text-[#666] text-xs">📝</span>}
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={e => { e.stopPropagation(); deleteSession(s.id) }}
+              className="absolute top-4 right-4 w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
+            >🗑</button>
           </div>
-        </div>
-      )}
-
+        ))}
+      </div>
     </div>
   )
 }
