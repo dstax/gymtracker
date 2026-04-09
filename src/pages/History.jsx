@@ -187,6 +187,42 @@ export default function History({ session }) {
     setSaving(false)
   }
 
+  function shareSession() {
+    const grouped = groupByExerciseOrdered(detail)
+    const dateStr = formatDate(selected.ended_at)
+    const durStr = fmt(selected.duration_seconds)
+    const volStr = (selected.total_volume / 1000).toFixed(1) + 't'
+    const hasPR = sessionPRs[selected.id]
+
+    let text = `💪 *${selected.workout_name}*\n`
+    text += `📅 ${dateStr}\n`
+    text += `⏱ Durata: ${durStr} | Volume: ${volStr}`
+    if (hasPR) text += ` | 🏆 PR`
+    text += `\n\n`
+
+    grouped.forEach(({ name, sets }) => {
+      text += `*${name}*\n`
+      sets.forEach((s, i) => {
+        text += `  Serie ${i + 1}: ${s.reps} rip × ${s.kg} kg`
+        if (s.is_pr) text += ` 🏆 PR`
+        text += `\n`
+      })
+      const nota = sets[0]?.note
+      if (nota) text += `  📝 ${nota}\n`
+      text += `\n`
+    })
+
+    text += `_Inviato da GymTracker_`
+
+    if (navigator.share) {
+      navigator.share({ text })
+    } else {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('Testo copiato negli appunti! Incollalo su WhatsApp.')
+      })
+    }
+  }
+
   function fmt(seconds) {
     if (!seconds) return '—'
     const m = Math.floor(seconds / 60)
@@ -276,7 +312,14 @@ export default function History({ session }) {
         <button onClick={() => { setSelected(null); setEditMode(false) }} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
         <div className="flex items-center gap-2">
           {!editMode && (
-            <button onClick={startEdit} className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center">✎</button>
+            <>
+              <button
+                onClick={shareSession}
+                className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
+                title="Condividi su WhatsApp"
+              >📤</button>
+              <button onClick={startEdit} className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center">✎</button>
+            </>
           )}
           <button onClick={() => deleteSession(selected.id)} className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center">🗑</button>
         </div>
@@ -435,20 +478,20 @@ export default function History({ session }) {
         </div>
       </div>
 
-<div className="mt-4 grid grid-cols-3 gap-2">
-  <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
-    <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalSessions}</div>
-    <div className="text-[#666] text-xs uppercase tracking-widest">Sessioni</div>
-  </div>
-  <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
-    <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalVolume}t</div>
-    <div className="text-[#666] text-xs uppercase tracking-widest">Volume</div>
-  </div>
-  <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
-    <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalHours}h</div>
-    <div className="text-[#666] text-xs uppercase tracking-widest">Ore</div>
-  </div>
-</div>
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalSessions}</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Sessioni</div>
+        </div>
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalVolume}t</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Volume</div>
+        </div>
+        <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2.5">
+          <div className="text-[#e8ff47] font-black text-xl">{globalStats.totalHours}h</div>
+          <div className="text-[#666] text-xs uppercase tracking-widest">Ore</div>
+        </div>
+      </div>
 
       <div className="mt-5 space-y-3">
         {sessions.length === 0 && (
