@@ -55,6 +55,8 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   const [editingCustomName, setEditingCustomName] = useState('')
   const [editingCustomMachine, setEditingCustomMachine] = useState('')
   const [savingCustomEdit, setSavingCustomEdit] = useState(false)
+  const [loadingLastSession, setLoadingLastSession] = useState(false)
+  const [lastSessionApplied, setLastSessionApplied] = useState(false)
 
   useEffect(() => {
     fetchExercises()
@@ -88,6 +90,77 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     if (data) setCustomExercises(data)
   }
 
+  async function copyLastSession() {
+    setLoadingLastSession(true)
+
+    // Trova l'ultima sessione per questa scheda
+    const { data: lastSessions } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .eq('workout_id', workout.id)
+      .order('ended_at', { ascending: false })
+      .limit(1)
+
+    if (!lastSessions || lastSessions.length === 0) {
+      setLoadingLastSession(false)
+      alert('Nessuna sessione precedente trovata per questa scheda.')
+      return
+    }
+
+    const lastSessionId = lastSessions[0].id
+
+    // Recupera i set dell'ultima sessione
+    const { data: lastSets } = await supabase
+      .from('session_sets')
+      .select('exercise_name, set_number, kg, reps')
+      .eq('session_id', lastSessionId)
+      .order('exercise_order', { ascending: true })
+      .order('set_number', { ascending: true })
+
+    if (!lastSets || lastSets.length === 0) {
+      setLoadingLastSession(false)
+      alert('Nessun dato trovato nell\'ultima sessione.')
+      return
+    }
+
+    // Costruisci mappa: exercise_name -> [{ kg, reps }]
+    const lastMap = {}
+    lastSets.forEach(s => {
+      if (!lastMap[s.exercise_name]) lastMap[s.exercise_name] = []
+      lastMap[s.exercise_name].push({ kg: s.kg, reps: s.reps })
+    })
+
+    // Aggiorna i set degli esercizi nella scheda
+    const updatedExercises = exercises.map(ex => {
+      const lastData = lastMap[ex.name]
+      if (!lastData) return ex
+      const updatedSets = ex.sets?.sort((a, b) => a.position - b.position).map((s, i) => ({
+        ...s,
+        kg: lastData[i]?.kg ?? s.kg,
+        reps: lastData[i]?.reps ?? s.reps
+      })) || []
+      return { ...ex, sets: updatedSets }
+    })
+
+    // Salva su DB
+    await Promise.all(updatedExercises.flatMap(ex => {
+      const lastData = lastMap[ex.name]
+      if (!lastData) return []
+      return ex.sets?.map((s, i) =>
+        supabase.from('sets').update({
+          kg: lastData[i]?.kg ?? s.kg,
+          reps: lastData[i]?.reps ?? s.reps
+        }).eq('id', s.id)
+      ) || []
+    }))
+
+    setExercises(updatedExercises)
+    setLastSessionApplied(true)
+    setLoadingLastSession(false)
+    setTimeout(() => setLastSessionApplied(false), 3000)
+  }
+
   async function moveExercise(fromIdx, toIdx) {
     if (toIdx < 0 || toIdx >= exercises.length) return
     const updated = [...exercises]
@@ -114,12 +187,10 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     const newCount = editSetValues.length
     const oldCount = currentSets.length
 
-    // Aggiorna serie esistenti
     await Promise.all(editSetValues.slice(0, oldCount).map((sv, i) =>
       supabase.from('sets').update({ reps: parseInt(sv.reps) || 0, kg: parseFloat(sv.kg) || 0 }).eq('id', currentSets[i].id)
     ))
 
-    // Aggiungi nuove serie se necessario
     if (newCount > oldCount) {
       const toInsert = editSetValues.slice(oldCount).map((sv, i) => ({
         exercise_id: editingEx.id,
@@ -130,7 +201,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
       await supabase.from('sets').insert(toInsert)
     }
 
-    // Elimina serie in eccesso
     if (newCount < oldCount) {
       const toDelete = currentSets.slice(newCount).map(s => s.id)
       await supabase.from('sets').delete().in('id', toDelete)
@@ -260,12 +330,31 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
         <button onClick={() => setShowModal(true)} className="w-10 h-10 border border-[#2a2a2a] rounded-xl bg-[#1a1a1a] text-white text-xl flex items-center justify-center">＋</button>
       </div>
 
-      <div className="mt-3">
+      <div className="mt-3 space-y-2">
         <button
           onClick={() => setSessionActive(true)}
           disabled={exercises.length === 0}
           className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-30"
         >▶ Inizia sessione</button>
+
+        {exercises.length > 0 && (
+          <button
+            onClick={copyLastSession}
+            disabled={loadingLastSession}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold border border-[#2a2a2a] bg-[#1a1a1a] disabled:opacity-40 flex items-center justify-center gap-2"
+          >
+            {loadingLastSession ? (
+              <span className="text-[#666]">Caricamento...</span>
+            ) : lastSessionApplied ? (
+              <span className="text-green-400">✓ Pesi copiati dall'ultima sessione!</span>
+            ) : (
+              <>
+                <span className="text-[#666]">📋</span>
+                <span className="text-[#888]">Copia pesi ultima sessione</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       <div className="mt-4 space-y-3">
@@ -362,7 +451,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
             <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
             <div className="text-white font-black text-xl tracking-wide mb-1">MODIFICA SERIE</div>
             <div className="text-[#666] text-xs mb-5">{editingEx.name}</div>
-
             <table className="w-full mb-3">
               <thead>
                 <tr>
@@ -379,51 +467,30 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                     <td className="py-2 text-center">
                       <input
                         className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                        type="number" step="2.5" min="0"
-                        value={sv.kg}
-                        onChange={e => {
-                          const updated = [...editSetValues]
-                          updated[i] = { ...updated[i], kg: e.target.value }
-                          setEditSetValues(updated)
-                        }}
+                        type="number" step="2.5" min="0" value={sv.kg}
+                        onChange={e => { const u = [...editSetValues]; u[i] = { ...u[i], kg: e.target.value }; setEditSetValues(u) }}
                       />
                     </td>
                     <td className="py-2 text-center">
                       <input
                         className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                        type="number" min="1"
-                        value={sv.reps}
-                        onChange={e => {
-                          const updated = [...editSetValues]
-                          updated[i] = { ...updated[i], reps: e.target.value }
-                          setEditSetValues(updated)
-                        }}
+                        type="number" min="1" value={sv.reps}
+                        onChange={e => { const u = [...editSetValues]; u[i] = { ...u[i], reps: e.target.value }; setEditSetValues(u) }}
                       />
                     </td>
                     <td className="py-2 text-center">
-                      <button
-                        onClick={() => removeSetFromEdit(i)}
-                        disabled={editSetValues.length <= 1}
-                        className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20"
-                      >✕</button>
+                      <button onClick={() => removeSetFromEdit(i)} disabled={editSetValues.length <= 1}
+                        className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20">✕</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-
-            <button
-              onClick={addSetToEdit}
-              className="w-full py-2 rounded-xl text-sm text-[#e8ff47] border border-[#e8ff47]/30 bg-[#e8ff47]/5 mb-5"
-            >
+            <button onClick={addSetToEdit} className="w-full py-2 rounded-xl text-sm text-[#e8ff47] border border-[#e8ff47]/30 bg-[#e8ff47]/5 mb-5">
               ＋ Aggiungi serie
             </button>
-
-            <button
-              onClick={saveEditEx}
-              disabled={savingEditEx}
-              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
-            >
+            <button onClick={saveEditEx} disabled={savingEditEx}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               {savingEditEx ? 'Salvataggio...' : '✓ Salva modifiche'}
             </button>
           </div>
@@ -530,16 +597,11 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                         <div className="p-3 space-y-2">
                           <input
                             className="w-full bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg px-3 py-2 text-white text-sm outline-none"
-                            value={editingCustomName}
-                            onChange={e => setEditingCustomName(e.target.value)}
-                            autoFocus
-                          />
+                            value={editingCustomName} onChange={e => setEditingCustomName(e.target.value)} autoFocus />
                           <input
                             className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-[#666] text-sm outline-none"
                             placeholder="Macchinario (opzionale)"
-                            value={editingCustomMachine}
-                            onChange={e => setEditingCustomMachine(e.target.value)}
-                          />
+                            value={editingCustomMachine} onChange={e => setEditingCustomMachine(e.target.value)} />
                           <div className="flex gap-2">
                             <button onClick={saveCustomExerciseEdit} disabled={savingCustomEdit || !editingCustomName.trim()}
                               className="flex-1 py-2 rounded-lg bg-[#e8ff47] text-black text-xs font-bold disabled:opacity-50">
