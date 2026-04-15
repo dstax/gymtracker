@@ -8,6 +8,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [currentIdx, setCurrentIdx] = useState(0)
   const [completedSets, setCompletedSets] = useState({})
   const [setValues, setSetValues] = useState({})
+  const [extraSets, setExtraSets] = useState({}) // { exId: [{ id, reps, kg, completed }] }
   const [exerciseNotes, setExerciseNotes] = useState({})
   const [totalSeconds, setTotalSeconds] = useState(0)
   const [restSeconds, setRestSeconds] = useState(0)
@@ -57,12 +58,12 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   useEffect(() => {
     if (loading || exercises.length === 0) return
     const state = {
-      completedSets, setValues, exerciseNotes,
+      completedSets, setValues, extraSets, exerciseNotes,
       totalSeconds, currentIdx,
       savedAt: new Date().toISOString()
     }
     localStorage.setItem(STORAGE_KEY(workout.id), JSON.stringify(state))
-  }, [completedSets, setValues, exerciseNotes, totalSeconds, currentIdx])
+  }, [completedSets, setValues, extraSets, exerciseNotes, totalSeconds, currentIdx])
 
   async function fetchExercises() {
     const { data } = await supabase
@@ -107,12 +108,14 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     })
     setSetValues(vals)
     setExerciseNotes(notes)
+    setExtraSets({})
   }
 
   function resumeSession() {
     if (!savedData) return
     setCompletedSets(savedData.completedSets || {})
     setSetValues(savedData.setValues || {})
+    setExtraSets(savedData.extraSets || {})
     setExerciseNotes(savedData.exerciseNotes || {})
     setTotalSeconds(savedData.totalSeconds || 0)
     setCurrentIdx(savedData.currentIdx || 0)
@@ -131,39 +134,61 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     localStorage.removeItem(STORAGE_KEY(workout.id))
   }
 
-  async function fetchHistoricalMaxKg() {
-    const { data: userSessions } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('user_id', userSession.user.id)
+  // Aggiunge una serie extra all'esercizio corrente
+  function addExtraSet(exId, currentSets) {
+    const allSets = [...currentSets, ...(extraSets[exId] || [])]
+    const lastSet = allSets[allSets.length - 1]
+    const lastKg = lastSet
+      ? (setValues[lastSet.id]?.kg ?? extraSets[exId]?.find(s => s.id === lastSet.id)?.kg ?? lastSet.kg ?? 0)
+      : 0
+    const lastReps = lastSet
+      ? (setValues[lastSet.id]?.reps ?? extraSets[exId]?.find(s => s.id === lastSet.id)?.reps ?? lastSet.reps ?? 10)
+      : 10
+    const newId = `extra_${exId}_${Date.now()}`
+    setExtraSets(prev => ({
+      ...prev,
+      [exId]: [...(prev[exId] || []), { id: newId, kg: lastKg, reps: lastReps, completed: false }]
+    }))
+  }
 
-    if (!userSessions || userSessions.length === 0) return {}
+  // Rimuove l'ultima serie extra
+  function removeLastExtraSet(exId) {
+    setExtraSets(prev => {
+      const current = prev[exId] || []
+      if (current.length === 0) return prev
+      const removed = current[current.length - 1]
+      // Rimuovi anche completedSets per quella serie
+      setCompletedSets(c => { const u = { ...c }; delete u[removed.id]; return u })
+      return { ...prev, [exId]: current.slice(0, -1) }
+    })
+  }
 
-    const sessionIds = userSessions.map(s => s.id)
-    const { data } = await supabase
-      .from('session_sets')
-      .select('exercise_name, kg')
-      .in('session_id', sessionIds)
+  // Rimuove l'ultima serie base (non completata)
+  function removeLastBaseSet(exId, baseSets) {
+    const lastBase = [...baseSets].reverse().find(s => !completedSets[s.id])
+    if (!lastBase) return
+    setExercises(prev => prev.map(ex => {
+      if (ex.id !== exId) return ex
+      return { ...ex, sets: ex.sets.filter(s => s.id !== lastBase.id) }
+    }))
+    setSetValues(prev => { const u = { ...prev }; delete u[lastBase.id]; return u })
+    setCompletedSets(prev => { const u = { ...prev }; delete u[lastBase.id]; return u })
+  }
 
-    const maxKg = {}
-    if (data) {
-      data.forEach(s => {
-        const kg = parseFloat(s.kg) || 0
-        if (!maxKg[s.exercise_name] || kg > maxKg[s.exercise_name]) {
-          maxKg[s.exercise_name] = kg
-        }
-      })
+  function toggleSet(setId, isExtra = false, exId = null) {
+    const isCompleting = isExtra
+      ? !extraSets[exId]?.find(s => s.id === setId)?.completed
+      : !completedSets[setId]
+
+    if (isExtra && exId) {
+      setExtraSets(prev => ({
+        ...prev,
+        [exId]: prev[exId].map(s => s.id === setId ? { ...s, completed: !s.completed } : s)
+      }))
+    } else {
+      setCompletedSets(prev => ({ ...prev, [setId]: !prev[setId] }))
     }
-    return maxKg
-  }
 
-  function fmt(s) {
-    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
-  }
-
-  function toggleSet(setId) {
-    const isCompleting = !completedSets[setId]
-    setCompletedSets(prev => ({ ...prev, [setId]: !prev[setId] }))
     if (isCompleting) {
       setRestSeconds(0)
       setRestActive(true)
@@ -171,8 +196,11 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   }
 
   function isExerciseCompleted(ex) {
-    const sets = ex.sets || []
-    return sets.length > 0 && sets.every(s => completedSets[s.id])
+    const baseSets = ex.sets || []
+    const extras = extraSets[ex.id] || []
+    const allBase = baseSets.length > 0 && baseSets.every(s => completedSets[s.id])
+    const allExtra = extras.every(s => s.completed)
+    return baseSets.length > 0 && allBase && allExtra
   }
 
   function resetRest() {
@@ -210,35 +238,71 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     }
   }
 
+  async function fetchHistoricalMaxKg() {
+    const { data: userSessions } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('user_id', userSession.user.id)
+    if (!userSessions || userSessions.length === 0) return {}
+    const sessionIds = userSessions.map(s => s.id)
+    const { data } = await supabase
+      .from('session_sets')
+      .select('exercise_name, kg')
+      .in('session_id', sessionIds)
+    const maxKg = {}
+    if (data) {
+      data.forEach(s => {
+        const kg = parseFloat(s.kg) || 0
+        if (!maxKg[s.exercise_name] || kg > maxKg[s.exercise_name]) maxKg[s.exercise_name] = kg
+      })
+    }
+    return maxKg
+  }
+
+  function fmt(s) {
+    return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
+  }
+
   async function endSession() {
     setSaving(true)
     clearInterval(totalRef.current)
     clearInterval(restRef.current)
 
     const historicalMax = await fetchHistoricalMaxKg()
-
     let totalVolume = 0
     const sessionSetsToInsert = []
     const sessionMax = {}
 
     exercises.forEach((ex, exerciseOrder) => {
       const sortedSets = ex.sets?.sort((a, b) => a.position - b.position) || []
+      const extras = extraSets[ex.id] || []
       const note = exerciseNotes[ex.id] || null
-      sortedSets.forEach(s => {
-        const val = setValues[s.id] || { reps: s.reps, kg: s.kg }
-        const kg = parseFloat(val.kg) || 0
-        const reps = parseInt(val.reps) || 0
-        totalVolume += reps * kg
+      const allSets = [
+        ...sortedSets.map(s => ({
+          id: s.id,
+          kg: parseFloat(setValues[s.id]?.kg) || 0,
+          reps: parseInt(setValues[s.id]?.reps) || 0,
+          isExtra: false
+        })),
+        ...extras.map(s => ({
+          id: s.id,
+          kg: parseFloat(s.kg) || 0,
+          reps: parseInt(s.reps) || 0,
+          isExtra: true
+        }))
+      ]
 
+      allSets.forEach((s, i) => {
+        const { kg, reps } = s
+        totalVolume += reps * kg
         const prevMax = Math.max(historicalMax[ex.name] || 0, sessionMax[ex.name] || 0)
         const isPR = kg > 0 && kg > prevMax
         if (kg > (sessionMax[ex.name] || 0)) sessionMax[ex.name] = kg
-
         sessionSetsToInsert.push({
           exercise_name: ex.name,
           exercise_id: ex.id,
           exercise_order: exerciseOrder,
-          set_number: s.position + 1,
+          set_number: i + 1,
           reps, kg, note, is_pr: isPR,
         })
       })
@@ -293,6 +357,8 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
   const currentEx = exercises[currentIdx]
   const currentSets = currentEx.sets?.sort((a, b) => a.position - b.position) || []
+  const currentExtras = extraSets[currentEx.id] || []
+  const totalSetsCount = currentSets.length + currentExtras.length
   const completedCount = exercises.filter(isExerciseCompleted).length
   const progress = (completedCount / exercises.length) * 100
 
@@ -362,7 +428,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
           <div className="text-white font-black text-xl">{currentEx.name}</div>
           {isExerciseCompleted(currentEx) && <span className="text-green-400 text-sm">✓</span>}
         </div>
-        <div className="text-[#666] text-xs mt-1">{currentSets.length} serie</div>
+        <div className="text-[#666] text-xs mt-1">{totalSetsCount} serie</div>
         {currentEx.machine && (
           <div className="inline-flex items-center gap-1 bg-blue-500/10 border border-blue-500/25 rounded-lg px-2 py-1 text-blue-400 text-xs mt-2">
             🟢 {currentEx.machine}
@@ -382,6 +448,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
             </tr>
           </thead>
           <tbody>
+            {/* SERIE BASE */}
             {currentSets.map((s, i) => (
               <tr key={s.id} className={`border-t border-[#1a1a1a] transition-opacity ${completedSets[s.id] ? 'opacity-40' : ''}`}>
                 <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
@@ -411,8 +478,66 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
                 </td>
               </tr>
             ))}
+
+            {/* SERIE EXTRA */}
+            {currentExtras.map((s, i) => (
+              <tr key={s.id} className={`border-t border-[#e8ff47]/10 transition-opacity ${s.completed ? 'opacity-40' : ''}`}>
+                <td className="py-2 text-center">
+                  <span className="text-[#e8ff47] font-mono text-xs">+{i + 1}</span>
+                </td>
+                <td className="py-2 text-center">
+                  <input
+                    className="bg-[#1a1a1a] border border-[#e8ff47]/30 rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                    type="number" step="2.5" min="0"
+                    value={s.kg}
+                    onChange={e => setExtraSets(prev => ({
+                      ...prev,
+                      [currentEx.id]: prev[currentEx.id].map(es => es.id === s.id ? { ...es, kg: parseFloat(e.target.value) || 0 } : es)
+                    }))}
+                  />
+                </td>
+                <td className="py-2 text-center">
+                  <input
+                    className="bg-[#1a1a1a] border border-[#e8ff47]/30 rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                    type="number" min="1"
+                    value={s.reps}
+                    onChange={e => setExtraSets(prev => ({
+                      ...prev,
+                      [currentEx.id]: prev[currentEx.id].map(es => es.id === s.id ? { ...es, reps: parseInt(e.target.value) || 0 } : es)
+                    }))}
+                  />
+                </td>
+                <td className="py-2 text-center">
+                  <button
+                    onClick={() => toggleSet(s.id, true, currentEx.id)}
+                    className={`w-8 h-8 rounded-lg border text-sm flex items-center justify-center mx-auto transition-all ${s.completed ? 'bg-[#4ade80] border-[#4ade80] text-black' : 'bg-[#1a1a1a] border-[#e8ff47]/30 text-[#e8ff47]'}`}
+                  >
+                    {s.completed ? '✓' : '○'}
+                  </button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
+
+        {/* PULSANTI AGGIUNGI / RIMUOVI SERIE */}
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={() => addExtraSet(currentEx.id, currentSets)}
+            className="flex-1 py-2 rounded-xl text-xs font-bold text-[#e8ff47] border border-[#e8ff47]/30 bg-[#e8ff47]/5"
+          >＋ Serie</button>
+          <button
+            onClick={() => {
+              if (currentExtras.length > 0) {
+                removeLastExtraSet(currentEx.id)
+              } else {
+                removeLastBaseSet(currentEx.id, currentSets)
+              }
+            }}
+            disabled={totalSetsCount <= 1}
+            className="flex-1 py-2 rounded-xl text-xs font-bold text-red-400 border border-red-500/30 bg-red-500/5 disabled:opacity-20"
+          >− Serie</button>
+        </div>
       </div>
 
       {/* NOTE ESERCIZIO */}
