@@ -8,7 +8,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [currentIdx, setCurrentIdx] = useState(0)
   const [completedSets, setCompletedSets] = useState({})
   const [setValues, setSetValues] = useState({})
-  const [extraSets, setExtraSets] = useState({}) // { exId: [{ id, reps, kg, completed }] }
+  const [extraSets, setExtraSets] = useState({})
   const [exerciseNotes, setExerciseNotes] = useState({})
   const [totalSeconds, setTotalSeconds] = useState(0)
   const [restSeconds, setRestSeconds] = useState(0)
@@ -17,6 +17,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [saving, setSaving] = useState(false)
   const [showExerciseList, setShowExerciseList] = useState(false)
   const [showResumeModal, setShowResumeModal] = useState(false)
+  const [showSetConfirm, setShowSetConfirm] = useState(null) // 'add' | 'remove'
   const [savedData, setSavedData] = useState(null)
   const totalRef = useRef(null)
   const restRef = useRef(null)
@@ -134,8 +135,9 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     localStorage.removeItem(STORAGE_KEY(workout.id))
   }
 
-  // Aggiunge una serie extra all'esercizio corrente
-  function addExtraSet(exId, currentSets) {
+  function confirmAddSet() {
+    const exId = exercises[currentIdx].id
+    const currentSets = exercises[currentIdx].sets?.sort((a, b) => a.position - b.position) || []
     const allSets = [...currentSets, ...(extraSets[exId] || [])]
     const lastSet = allSets[allSets.length - 1]
     const lastKg = lastSet
@@ -149,30 +151,34 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
       ...prev,
       [exId]: [...(prev[exId] || []), { id: newId, kg: lastKg, reps: lastReps, completed: false }]
     }))
+    setShowSetConfirm(null)
   }
 
-  // Rimuove l'ultima serie extra
-  function removeLastExtraSet(exId) {
-    setExtraSets(prev => {
-      const current = prev[exId] || []
-      if (current.length === 0) return prev
-      const removed = current[current.length - 1]
-      // Rimuovi anche completedSets per quella serie
-      setCompletedSets(c => { const u = { ...c }; delete u[removed.id]; return u })
-      return { ...prev, [exId]: current.slice(0, -1) }
-    })
-  }
+  function confirmRemoveSet() {
+    const ex = exercises[currentIdx]
+    const exId = ex.id
+    const currentExtras = extraSets[exId] || []
+    const currentSets = ex.sets?.sort((a, b) => a.position - b.position) || []
 
-  // Rimuove l'ultima serie base (non completata)
-  function removeLastBaseSet(exId, baseSets) {
-    const lastBase = [...baseSets].reverse().find(s => !completedSets[s.id])
-    if (!lastBase) return
-    setExercises(prev => prev.map(ex => {
-      if (ex.id !== exId) return ex
-      return { ...ex, sets: ex.sets.filter(s => s.id !== lastBase.id) }
-    }))
-    setSetValues(prev => { const u = { ...prev }; delete u[lastBase.id]; return u })
-    setCompletedSets(prev => { const u = { ...prev }; delete u[lastBase.id]; return u })
+    if (currentExtras.length > 0) {
+      setExtraSets(prev => {
+        const current = prev[exId] || []
+        if (current.length === 0) return prev
+        const removed = current[current.length - 1]
+        setCompletedSets(c => { const u = { ...c }; delete u[removed.id]; return u })
+        return { ...prev, [exId]: current.slice(0, -1) }
+      })
+    } else {
+      const lastBase = [...currentSets].reverse().find(s => !completedSets[s.id])
+      if (!lastBase) { setShowSetConfirm(null); return }
+      setExercises(prev => prev.map(e => {
+        if (e.id !== exId) return e
+        return { ...e, sets: e.sets.filter(s => s.id !== lastBase.id) }
+      }))
+      setSetValues(prev => { const u = { ...prev }; delete u[lastBase.id]; return u })
+      setCompletedSets(prev => { const u = { ...prev }; delete u[lastBase.id]; return u })
+    }
+    setShowSetConfirm(null)
   }
 
   function toggleSet(setId, isExtra = false, exId = null) {
@@ -279,16 +285,12 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
       const note = exerciseNotes[ex.id] || null
       const allSets = [
         ...sortedSets.map(s => ({
-          id: s.id,
           kg: parseFloat(setValues[s.id]?.kg) || 0,
           reps: parseInt(setValues[s.id]?.reps) || 0,
-          isExtra: false
         })),
         ...extras.map(s => ({
-          id: s.id,
           kg: parseFloat(s.kg) || 0,
           reps: parseInt(s.reps) || 0,
-          isExtra: true
         }))
       ]
 
@@ -385,6 +387,47 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
                 Inizia da capo
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CONFERMA AGGIUNGI/RIMUOVI SERIE */}
+      {showSetConfirm && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-3xl w-full max-w-[340px] p-6">
+            {showSetConfirm === 'add' ? (
+              <>
+                <div className="text-2xl mb-2">＋</div>
+                <div className="text-white font-black text-lg mb-1">Aggiungere una serie?</div>
+                <div className="text-[#666] text-sm mb-5">
+                  Verrà aggiunta una serie extra a <span className="text-white font-medium">{currentEx.name}</span>.
+                </div>
+                <div className="space-y-3">
+                  <button onClick={confirmAddSet} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm">
+                    ＋ Aggiungi serie
+                  </button>
+                  <button onClick={() => setShowSetConfirm(null)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
+                    Annulla
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-2xl mb-2">−</div>
+                <div className="text-white font-black text-lg mb-1">Rimuovere una serie?</div>
+                <div className="text-[#666] text-sm mb-5">
+                  Verrà rimossa l'ultima serie di <span className="text-white font-medium">{currentEx.name}</span>.
+                </div>
+                <div className="space-y-3">
+                  <button onClick={confirmRemoveSet} className="w-full bg-red-500/20 text-red-400 border border-red-500/30 font-bold py-3 rounded-xl text-sm">
+                    − Rimuovi serie
+                  </button>
+                  <button onClick={() => setShowSetConfirm(null)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
+                    Annulla
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -523,17 +566,11 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
         {/* PULSANTI AGGIUNGI / RIMUOVI SERIE */}
         <div className="flex gap-2 mt-3">
           <button
-            onClick={() => addExtraSet(currentEx.id, currentSets)}
+            onClick={() => setShowSetConfirm('add')}
             className="flex-1 py-2 rounded-xl text-xs font-bold text-[#e8ff47] border border-[#e8ff47]/30 bg-[#e8ff47]/5"
           >＋ Serie</button>
           <button
-            onClick={() => {
-              if (currentExtras.length > 0) {
-                removeLastExtraSet(currentEx.id)
-              } else {
-                removeLastBaseSet(currentEx.id, currentSets)
-              }
-            }}
+            onClick={() => setShowSetConfirm('remove')}
             disabled={totalSetsCount <= 1}
             className="flex-1 py-2 rounded-xl text-xs font-bold text-red-400 border border-red-500/30 bg-red-500/5 disabled:opacity-20"
           >− Serie</button>
