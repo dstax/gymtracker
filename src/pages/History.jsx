@@ -47,13 +47,14 @@ export default function History({ session }) {
   const [editSets, setEditSets] = useState({})
   const [editNotes, setEditNotes] = useState({})
   const [editNewSets, setEditNewSets] = useState({})
-  const [editDeletedExercises, setEditDeletedExercises] = useState([]) // nomi esercizi eliminati
-  const [editNewExercises, setEditNewExercises] = useState([]) // { name, machine, sets: [{kg, reps}] }
+  const [editDeletedExercises, setEditDeletedExercises] = useState([])
+  const [editNewExercises, setEditNewExercises] = useState([])
+  const [editExerciseOrder, setEditExerciseOrder] = useState([]) // ordine nomi esercizi
   const [saving, setSaving] = useState(false)
   const [showAddExModal, setShowAddExModal] = useState(false)
   const [addExSelected, setAddExSelected] = useState('')
   const [addExSets, setAddExSets] = useState([{ kg: 0, reps: 10 }])
-  const [confirmDeleteEx, setConfirmDeleteEx] = useState(null) // nome esercizio da eliminare
+  const [confirmDeleteEx, setConfirmDeleteEx] = useState(null)
   const [customExercises, setCustomExercises] = useState([])
 
   useEffect(() => {
@@ -180,17 +181,42 @@ export default function History({ session }) {
     const vals = {}
     const notes = {}
     const newSets = {}
+    const order = []
     groupByExerciseOrdered(detail).forEach(({ name, sets }) => {
       sets.forEach(s => { vals[s.id] = { reps: s.reps, kg: s.kg } })
       notes[name] = sets[0]?.note || ''
       newSets[name] = []
+      order.push(name)
     })
     setEditSets(vals)
     setEditNotes(notes)
     setEditNewSets(newSets)
     setEditDeletedExercises([])
     setEditNewExercises([])
+    setEditExerciseOrder(order)
     setEditMode(true)
+  }
+
+  function moveExercise(name, direction) {
+    setEditExerciseOrder(prev => {
+      const idx = prev.indexOf(name)
+      if (idx === -1) return prev
+      const newOrder = [...prev]
+      const targetIdx = idx + direction
+      if (targetIdx < 0 || targetIdx >= newOrder.length) return prev
+      ;[newOrder[idx], newOrder[targetIdx]] = [newOrder[targetIdx], newOrder[idx]]
+      return newOrder
+    })
+  }
+
+  function moveNewExercise(idx, direction) {
+    setEditNewExercises(prev => {
+      const newArr = [...prev]
+      const targetIdx = idx + direction
+      if (targetIdx < 0 || targetIdx >= newArr.length) return prev
+      ;[newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]]
+      return newArr
+    })
   }
 
   function addNewSet(exerciseName, sets) {
@@ -214,31 +240,28 @@ export default function History({ session }) {
     const setsOfEx = detail.filter(s => s.exercise_name === exerciseName)
     const remainingExisting = setsOfEx.filter(s => editSets[s.id] && s.id !== setId).length
     const remainingNew = (editNewSets[exerciseName] || []).length
-    if (remainingExisting + remainingNew === 0) return // non rimuovere l'ultima serie
+    if (remainingExisting + remainingNew === 0) return
     setEditSets(prev => { const u = { ...prev }; delete u[setId]; return u })
     setDetail(prev => prev.filter(s => s.id !== setId))
   }
 
-  // Segna un esercizio come da eliminare
   function markDeleteExercise(name) {
     setConfirmDeleteEx(null)
     setEditDeletedExercises(prev => [...prev, name])
-    // Rimuovi anche eventuali nuove serie per quell'esercizio
     setEditNewSets(prev => { const u = { ...prev }; delete u[name]; return u })
   }
 
-  // Annulla eliminazione esercizio
   function unmarkDeleteExercise(name) {
     setEditDeletedExercises(prev => prev.filter(n => n !== name))
   }
 
-  // Aggiunge un nuovo esercizio alla sessione (solo in edit)
   function confirmAddExercise() {
     if (!addExSelected || addExSets.length === 0) return
-    setEditNewExercises(prev => [...prev, {
+    const newEx = {
       name: addExSelected,
       sets: addExSets.map(s => ({ kg: parseFloat(s.kg) || 0, reps: parseInt(s.reps) || 0 }))
-    }])
+    }
+    setEditNewExercises(prev => [...prev, newEx])
     setShowAddExModal(false)
     setAddExSelected('')
     setAddExSets([{ kg: 0, reps: 10 }])
@@ -253,7 +276,7 @@ export default function History({ session }) {
     const newDuration = parseInt(editMinutes) * 60
     const grouped = groupByExerciseOrdered(detail)
 
-    // Elimina tutti i session_sets degli esercizi rimossi
+    // Elimina session_sets degli esercizi rimossi
     for (const exName of editDeletedExercises) {
       const idsToDelete = detail.filter(s => s.exercise_name === exName).map(s => s.id)
       if (idsToDelete.length > 0) {
@@ -261,33 +284,38 @@ export default function History({ session }) {
       }
     }
 
-    // Aggiorna serie esistenti (solo quelli non eliminati)
+    // Costruisci l'ordine finale combinando esercizi esistenti e nuovi
+    const allExistingNames = editExerciseOrder.filter(n => !editDeletedExercises.includes(n))
+    const newExNames = editNewExercises.map(e => e.name)
+    // L'ordine finale: esistenti (riordinati) + nuovi (in fondo, ma mantenendo il loro ordine)
+    const finalOrder = [...allExistingNames, ...newExNames]
+
+    // Aggiorna exercise_order per tutti i set degli esercizi esistenti secondo il nuovo ordine
     const activeDetail = detail.filter(s => !editDeletedExercises.includes(s.exercise_name))
     await Promise.all(activeDetail.map(s => {
       const val = editSets[s.id]
       if (!val) return supabase.from('session_sets').delete().eq('id', s.id)
+      const newOrder = finalOrder.indexOf(s.exercise_name)
       return supabase.from('session_sets').update({
         reps: parseInt(val.reps) || 0,
         kg: parseFloat(val.kg) || 0,
-        note: editNotes[s.exercise_name] ?? s.note
+        note: editNotes[s.exercise_name] ?? s.note,
+        exercise_order: newOrder >= 0 ? newOrder : s.exercise_order
       }).eq('id', s.id)
     }))
-
-    // Calcola exercise_order massimo esistente
-    const maxOrder = Math.max(0, ...grouped.map(g => g.sets[0]?.exercise_order ?? 0))
 
     // Inserisci nuove serie per esercizi esistenti
     const toInsert = []
     grouped.filter(g => !editDeletedExercises.includes(g.name)).forEach(({ name, sets }) => {
       const newS = editNewSets[name] || []
-      const exerciseOrder = sets[0]?.exercise_order ?? 0
+      const exerciseOrder = finalOrder.indexOf(name)
       const exerciseId = sets[0]?.exercise_id ?? null
       newS.forEach((ns, i) => {
         toInsert.push({
           session_id: selected.id,
           exercise_name: name,
           exercise_id: exerciseId,
-          exercise_order: exerciseOrder,
+          exercise_order: exerciseOrder >= 0 ? exerciseOrder : 0,
           set_number: sets.length + i + 1,
           reps: parseInt(ns.reps) || 0,
           kg: parseFloat(ns.kg) || 0,
@@ -298,13 +326,14 @@ export default function History({ session }) {
     })
 
     // Inserisci nuovi esercizi
-    editNewExercises.forEach((ex, exIdx) => {
+    editNewExercises.forEach((ex) => {
+      const exerciseOrder = finalOrder.indexOf(ex.name)
       ex.sets.forEach((s, i) => {
         toInsert.push({
           session_id: selected.id,
           exercise_name: ex.name,
           exercise_id: null,
-          exercise_order: maxOrder + exIdx + 1,
+          exercise_order: exerciseOrder >= 0 ? exerciseOrder : finalOrder.length,
           set_number: i + 1,
           reps: s.reps,
           kg: s.kg,
@@ -458,14 +487,14 @@ export default function History({ session }) {
               Tutte le serie di <span className="text-white font-medium">{confirmDeleteEx}</span> verranno rimosse dalla sessione.
             </div>
             <div className="space-y-3">
-              <button
-                onClick={() => markDeleteExercise(confirmDeleteEx)}
-                className="w-full bg-red-500/20 text-red-400 border border-red-500/30 font-bold py-3 rounded-xl text-sm"
-              >Elimina esercizio</button>
-              <button
-                onClick={() => setConfirmDeleteEx(null)}
-                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
-              >Annulla</button>
+              <button onClick={() => markDeleteExercise(confirmDeleteEx)}
+                className="w-full bg-red-500/20 text-red-400 border border-red-500/30 font-bold py-3 rounded-xl text-sm">
+                Elimina esercizio
+              </button>
+              <button onClick={() => setConfirmDeleteEx(null)}
+                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
+                Annulla
+              </button>
             </div>
           </div>
         </div>
@@ -481,8 +510,7 @@ export default function History({ session }) {
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Esercizio</label>
             <select
               className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
-              value={addExSelected}
-              onChange={e => setAddExSelected(e.target.value)}
+              value={addExSelected} onChange={e => setAddExSelected(e.target.value)}
             >
               <option value="">— Seleziona esercizio —</option>
               {getAllExerciseNames().map(name => (
@@ -505,46 +533,34 @@ export default function History({ session }) {
                   <tr key={i} className="border-t border-[#1a1a1a]">
                     <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
                     <td className="py-2 text-center">
-                      <input
-                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                        type="number" step="2.5" min="0"
-                        value={s.kg}
-                        onChange={e => setAddExSets(prev => prev.map((x, j) => j === i ? { ...x, kg: e.target.value } : x))}
-                      />
+                      <input className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                        type="number" step="2.5" min="0" value={s.kg}
+                        onChange={e => setAddExSets(prev => prev.map((x, j) => j === i ? { ...x, kg: e.target.value } : x))} />
                     </td>
                     <td className="py-2 text-center">
-                      <input
-                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                        type="number" min="1"
-                        value={s.reps}
-                        onChange={e => setAddExSets(prev => prev.map((x, j) => j === i ? { ...x, reps: e.target.value } : x))}
-                      />
+                      <input className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                        type="number" min="1" value={s.reps}
+                        onChange={e => setAddExSets(prev => prev.map((x, j) => j === i ? { ...x, reps: e.target.value } : x))} />
                     </td>
                     <td className="py-2 text-center">
-                      <button
-                        onClick={() => setAddExSets(prev => prev.filter((_, j) => j !== i))}
+                      <button onClick={() => setAddExSets(prev => prev.filter((_, j) => j !== i))}
                         disabled={addExSets.length <= 1}
-                        className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20"
-                      >✕</button>
+                        className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20">✕</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
-            <button
-              onClick={() => setAddExSets(prev => {
-                const last = prev[prev.length - 1]
-                return [...prev, { kg: last?.kg ?? 0, reps: last?.reps ?? 10 }]
-              })}
-              className="w-full py-2 rounded-xl text-xs text-[#e8ff47] border border-[#e8ff47]/20 bg-[#e8ff47]/5 mb-5"
-            >＋ Aggiungi serie</button>
+            <button onClick={() => setAddExSets(prev => { const last = prev[prev.length - 1]; return [...prev, { kg: last?.kg ?? 0, reps: last?.reps ?? 10 }] })}
+              className="w-full py-2 rounded-xl text-xs text-[#e8ff47] border border-[#e8ff47]/20 bg-[#e8ff47]/5 mb-5">
+              ＋ Aggiungi serie
+            </button>
 
-            <button
-              onClick={confirmAddExercise}
-              disabled={!addExSelected}
-              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
-            >＋ Aggiungi alla sessione</button>
+            <button onClick={confirmAddExercise} disabled={!addExSelected}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
+              ＋ Aggiungi alla sessione
+            </button>
           </div>
         </div>
       )}
@@ -567,16 +583,12 @@ export default function History({ session }) {
           <div className="text-[#e8ff47] text-xs uppercase tracking-widest mb-4">Modifica sessione</div>
 
           <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome sessione</label>
-          <input
-            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
-            value={editName} onChange={e => setEditName(e.target.value)}
-          />
+          <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+            value={editName} onChange={e => setEditName(e.target.value)} />
 
           <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Durata (minuti)</label>
-          <input
-            className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-5"
-            type="number" min="1" value={editMinutes} onChange={e => setEditMinutes(e.target.value)}
-          />
+          <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-5"
+            type="number" min="1" value={editMinutes} onChange={e => setEditMinutes(e.target.value)} />
 
           <div className="flex items-center justify-between mb-3">
             <div className="text-[#666] text-xs uppercase tracking-widest">Esercizi e serie</div>
@@ -587,36 +599,48 @@ export default function History({ session }) {
           </div>
 
           <div className="space-y-4">
-            {/* ESERCIZI ESISTENTI */}
-            {groupByExerciseOrdered(detail).map(({ name, sets }) => {
+            {/* ESERCIZI ESISTENTI — in ordine editExerciseOrder */}
+            {editExerciseOrder.map((name, orderIdx) => {
+              const group = groupByExerciseOrdered(detail).find(g => g.name === name)
+              if (!group) return null
+              const { sets } = group
               const isDeleted = editDeletedExercises.includes(name)
+              const totalExisting = editExerciseOrder.length
+              const totalNew = editNewExercises.length
+              const totalAll = totalExisting + totalNew
+
               return (
                 <div key={name} className={`rounded-2xl p-4 border transition-all ${isDeleted ? 'bg-red-500/5 border-red-500/20 opacity-50' : 'bg-[#111] border-[#2a2a2a]'}`}>
                   <div className="flex items-center justify-between mb-3">
-                    <div className="text-white font-bold">{name}</div>
-                    {isDeleted ? (
-                      <button
-                        onClick={() => unmarkDeleteExercise(name)}
-                        className="text-xs text-[#e8ff47] border border-[#e8ff47]/30 rounded-lg px-2 py-1"
-                      >↩ Ripristina</button>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmDeleteEx(name)}
-                        className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
-                      >🗑</button>
-                    )}
+                    <div className="text-white font-bold flex-1">{name}</div>
+                    <div className="flex items-center gap-1">
+                      {/* FRECCE RIORDINO */}
+                      {!isDeleted && (
+                        <div className="flex flex-col gap-0.5 mr-1">
+                          <button onClick={() => moveExercise(name, -1)} disabled={orderIdx === 0}
+                            className="w-6 h-6 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20">↑</button>
+                          <button onClick={() => moveExercise(name, 1)} disabled={orderIdx === totalExisting - 1 && totalNew === 0}
+                            className="w-6 h-6 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20">↓</button>
+                        </div>
+                      )}
+                      {isDeleted ? (
+                        <button onClick={() => unmarkDeleteExercise(name)}
+                          className="text-xs text-[#e8ff47] border border-[#e8ff47]/30 rounded-lg px-2 py-1">↩ Ripristina</button>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteEx(name)}
+                          className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center">🗑</button>
+                      )}
+                    </div>
                   </div>
 
                   {!isDeleted && (
                     <>
                       <div className="flex items-center gap-2 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 mb-3">
                         <span className="text-[#444] text-xs flex-shrink-0">📝</span>
-                        <input
-                          className="flex-1 bg-transparent text-white text-xs outline-none placeholder-[#444]"
+                        <input className="flex-1 bg-transparent text-white text-xs outline-none placeholder-[#444]"
                           placeholder="Nota esercizio..."
                           value={editNotes[name] ?? ''}
-                          onChange={e => setEditNotes(prev => ({ ...prev, [name]: e.target.value }))}
-                        />
+                          onChange={e => setEditNotes(prev => ({ ...prev, [name]: e.target.value }))} />
                       </div>
 
                       <table className="w-full mb-2">
@@ -633,27 +657,21 @@ export default function History({ session }) {
                             <tr key={s.id} className="border-t border-[#1a1a1a]">
                               <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
                               <td className="py-2 text-center">
-                                <input
-                                  className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                                <input className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
                                   type="number" step="2.5" min="0"
                                   value={editSets[s.id]?.kg ?? s.kg}
-                                  onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], kg: e.target.value } }))}
-                                />
+                                  onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], kg: e.target.value } }))} />
                               </td>
                               <td className="py-2 text-center">
-                                <input
-                                  className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                                <input className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
                                   type="number" min="1"
                                   value={editSets[s.id]?.reps ?? s.reps}
-                                  onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], reps: e.target.value } }))}
-                                />
+                                  onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], reps: e.target.value } }))} />
                               </td>
                               <td className="py-2 text-center">
-                                <button
-                                  onClick={() => removeExistingSet(s.id, name)}
+                                <button onClick={() => removeExistingSet(s.id, name)}
                                   disabled={sets.filter(x => editSets[x.id]).length <= 1 && (editNewSets[name] || []).length === 0}
-                                  className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20"
-                                >✕</button>
+                                  className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20">✕</button>
                               </td>
                             </tr>
                           ))}
@@ -664,24 +682,14 @@ export default function History({ session }) {
                               <tr key={`new-${i}`} className="border-t border-[#1a1a1a]">
                                 <td className="py-2 text-center text-[#e8ff47] font-mono text-sm">{existingCount + i + 1}</td>
                                 <td className="py-2 text-center">
-                                  <input
-                                    className="bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                                    type="number" step="2.5" min="0"
-                                    value={ns.kg}
-                                    onChange={e => setEditNewSets(prev => {
-                                      const updated = [...prev[name]]; updated[i] = { ...updated[i], kg: e.target.value }; return { ...prev, [name]: updated }
-                                    })}
-                                  />
+                                  <input className="bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                                    type="number" step="2.5" min="0" value={ns.kg}
+                                    onChange={e => setEditNewSets(prev => { const u = [...prev[name]]; u[i] = { ...u[i], kg: e.target.value }; return { ...prev, [name]: u } })} />
                                 </td>
                                 <td className="py-2 text-center">
-                                  <input
-                                    className="bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                                    type="number" min="1"
-                                    value={ns.reps}
-                                    onChange={e => setEditNewSets(prev => {
-                                      const updated = [...prev[name]]; updated[i] = { ...updated[i], reps: e.target.value }; return { ...prev, [name]: updated }
-                                    })}
-                                  />
+                                  <input className="bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                                    type="number" min="1" value={ns.reps}
+                                    onChange={e => setEditNewSets(prev => { const u = [...prev[name]]; u[i] = { ...u[i], reps: e.target.value }; return { ...prev, [name]: u } })} />
                                 </td>
                                 <td className="py-2 text-center">
                                   <button onClick={() => removeNewSet(name, i)}
@@ -707,13 +715,17 @@ export default function History({ session }) {
             {editNewExercises.map((ex, exIdx) => (
               <div key={`newex-${exIdx}`} className="bg-[#111] border border-[#e8ff47]/20 rounded-2xl p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="text-white font-bold">{ex.name}</div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[#e8ff47] text-xs">nuovo</span>
-                    <button
-                      onClick={() => removeNewExercise(exIdx)}
-                      className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
-                    >🗑</button>
+                  <div className="text-white font-bold flex-1">{ex.name}</div>
+                  <div className="flex items-center gap-1">
+                    <div className="flex flex-col gap-0.5 mr-1">
+                      <button onClick={() => moveNewExercise(exIdx, -1)} disabled={exIdx === 0}
+                        className="w-6 h-6 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20">↑</button>
+                      <button onClick={() => moveNewExercise(exIdx, 1)} disabled={exIdx === editNewExercises.length - 1}
+                        className="w-6 h-6 rounded border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20">↓</button>
+                    </div>
+                    <span className="text-[#e8ff47] text-xs mr-1">nuovo</span>
+                    <button onClick={() => removeNewExercise(exIdx)}
+                      className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center">🗑</button>
                   </div>
                 </div>
                 <table className="w-full">
@@ -728,12 +740,8 @@ export default function History({ session }) {
                     {ex.sets.map((s, i) => (
                       <tr key={i} className="border-t border-[#1a1a1a]">
                         <td className="py-2 text-center text-[#e8ff47] font-mono text-sm">{i + 1}</td>
-                        <td className="py-2 text-center">
-                          <span className="text-[#e8ff47] font-mono font-bold text-sm">{s.kg} kg</span>
-                        </td>
-                        <td className="py-2 text-center">
-                          <span className="text-white font-mono text-sm">{s.reps} rip</span>
-                        </td>
+                        <td className="py-2 text-center"><span className="text-[#e8ff47] font-mono font-bold text-sm">{s.kg} kg</span></td>
+                        <td className="py-2 text-center"><span className="text-white font-mono text-sm">{s.reps} rip</span></td>
                       </tr>
                     ))}
                   </tbody>
