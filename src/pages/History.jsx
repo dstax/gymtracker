@@ -2,6 +2,31 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import Stats from './Stats'
 
+const DEFAULT_EXERCISES = [
+  { name: 'Abdominal Crunch', machine: 'Abdominal Crunch' },
+  { name: 'Arm Curl', machine: 'Arm Curl' },
+  { name: 'Arm Extension', machine: 'Arm Extension' },
+  { name: 'Chest Press', machine: 'Chest Press' },
+  { name: 'Curl con Barra EZ', machine: 'Barra EZ' },
+  { name: 'Curl con Manubri', machine: 'Bilancieri e Manubri' },
+  { name: 'Delts Machine', machine: 'Delts Machine' },
+  { name: 'Glute Press', machine: 'Glute Press' },
+  { name: 'Incline Chest Press', machine: 'Incline Chest Press' },
+  { name: 'Lat Machine', machine: 'Lat Machine' },
+  { name: 'Leg Curl (Seduto)', machine: 'Leg Curl (Seduto)' },
+  { name: 'Leg Extension', machine: 'Leg Extension' },
+  { name: 'Leg Press', machine: 'Leg Press' },
+  { name: 'Low Row', machine: 'Low Row' },
+  { name: 'Panca Piana', machine: 'Panca Piana (Bilanciere/Manubri)' },
+  { name: 'Pectoral Machine', machine: 'Pectoral Machine' },
+  { name: 'Plank', machine: 'Corpo libero' },
+  { name: 'Pulley', machine: 'Pulley' },
+  { name: 'Row Machine', machine: 'Row Machine' },
+  { name: 'Shoulder Press', machine: 'Shoulder Press' },
+  { name: 'Standing Leg Curl', machine: 'Standing Leg Curl' },
+  { name: 'Tricipiti ai Cavi', machine: 'Cavi' },
+]
+
 export default function History({ session }) {
   const [sessions, setSessions] = useState([])
   const [sessionPRs, setSessionPRs] = useState({})
@@ -22,12 +47,20 @@ export default function History({ session }) {
   const [editSets, setEditSets] = useState({})
   const [editNotes, setEditNotes] = useState({})
   const [editNewSets, setEditNewSets] = useState({})
+  const [editDeletedExercises, setEditDeletedExercises] = useState([]) // nomi esercizi eliminati
+  const [editNewExercises, setEditNewExercises] = useState([]) // { name, machine, sets: [{kg, reps}] }
   const [saving, setSaving] = useState(false)
+  const [showAddExModal, setShowAddExModal] = useState(false)
+  const [addExSelected, setAddExSelected] = useState('')
+  const [addExSets, setAddExSets] = useState([{ kg: 0, reps: 10 }])
+  const [confirmDeleteEx, setConfirmDeleteEx] = useState(null) // nome esercizio da eliminare
+  const [customExercises, setCustomExercises] = useState([])
 
   useEffect(() => {
     fetchSessions()
     fetchGlobalStats()
     fetchSessionPRs()
+    fetchCustomExercises()
   }, [])
 
   async function fetchSessions() {
@@ -71,6 +104,15 @@ export default function History({ session }) {
       totalHours: totalHours.toFixed(1),
       avgPerWeek: (totalSessions / weeksDiff).toFixed(1)
     })
+  }
+
+  async function fetchCustomExercises() {
+    const { data } = await supabase
+      .from('custom_exercises')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('name')
+    if (data) setCustomExercises(data)
   }
 
   async function fetchPRs() {
@@ -127,6 +169,11 @@ export default function History({ session }) {
     return order.map(name => ({ name, sets: groups[name] }))
   }
 
+  function getAllExerciseNames() {
+    const custom = customExercises.map(e => e.name)
+    return [...DEFAULT_EXERCISES.map(e => e.name), ...custom].sort((a, b) => a.localeCompare(b))
+  }
+
   function startEdit() {
     setEditName(selected.workout_name || '')
     setEditMinutes(Math.floor((selected.duration_seconds || 0) / 60))
@@ -141,6 +188,8 @@ export default function History({ session }) {
     setEditSets(vals)
     setEditNotes(notes)
     setEditNewSets(newSets)
+    setEditDeletedExercises([])
+    setEditNewExercises([])
     setEditMode(true)
   }
 
@@ -161,35 +210,75 @@ export default function History({ session }) {
     }))
   }
 
-  function removeExistingSet(setId) {
-    setEditSets(prev => {
-      const updated = { ...prev }
-      delete updated[setId]
-      return updated
-    })
+  function removeExistingSet(setId, exerciseName) {
+    const setsOfEx = detail.filter(s => s.exercise_name === exerciseName)
+    const remainingExisting = setsOfEx.filter(s => editSets[s.id] && s.id !== setId).length
+    const remainingNew = (editNewSets[exerciseName] || []).length
+    if (remainingExisting + remainingNew === 0) return // non rimuovere l'ultima serie
+    setEditSets(prev => { const u = { ...prev }; delete u[setId]; return u })
     setDetail(prev => prev.filter(s => s.id !== setId))
+  }
+
+  // Segna un esercizio come da eliminare
+  function markDeleteExercise(name) {
+    setConfirmDeleteEx(null)
+    setEditDeletedExercises(prev => [...prev, name])
+    // Rimuovi anche eventuali nuove serie per quell'esercizio
+    setEditNewSets(prev => { const u = { ...prev }; delete u[name]; return u })
+  }
+
+  // Annulla eliminazione esercizio
+  function unmarkDeleteExercise(name) {
+    setEditDeletedExercises(prev => prev.filter(n => n !== name))
+  }
+
+  // Aggiunge un nuovo esercizio alla sessione (solo in edit)
+  function confirmAddExercise() {
+    if (!addExSelected || addExSets.length === 0) return
+    setEditNewExercises(prev => [...prev, {
+      name: addExSelected,
+      sets: addExSets.map(s => ({ kg: parseFloat(s.kg) || 0, reps: parseInt(s.reps) || 0 }))
+    }])
+    setShowAddExModal(false)
+    setAddExSelected('')
+    setAddExSets([{ kg: 0, reps: 10 }])
+  }
+
+  function removeNewExercise(idx) {
+    setEditNewExercises(prev => prev.filter((_, i) => i !== idx))
   }
 
   async function saveEdit() {
     setSaving(true)
     const newDuration = parseInt(editMinutes) * 60
-
-    // Aggiorna serie esistenti e note
     const grouped = groupByExerciseOrdered(detail)
-    await Promise.all(detail.map(s => {
+
+    // Elimina tutti i session_sets degli esercizi rimossi
+    for (const exName of editDeletedExercises) {
+      const idsToDelete = detail.filter(s => s.exercise_name === exName).map(s => s.id)
+      if (idsToDelete.length > 0) {
+        await supabase.from('session_sets').delete().in('id', idsToDelete)
+      }
+    }
+
+    // Aggiorna serie esistenti (solo quelli non eliminati)
+    const activeDetail = detail.filter(s => !editDeletedExercises.includes(s.exercise_name))
+    await Promise.all(activeDetail.map(s => {
       const val = editSets[s.id]
       if (!val) return supabase.from('session_sets').delete().eq('id', s.id)
-      const exName = s.exercise_name
       return supabase.from('session_sets').update({
         reps: parseInt(val.reps) || 0,
         kg: parseFloat(val.kg) || 0,
-        note: editNotes[exName] ?? s.note
+        note: editNotes[s.exercise_name] ?? s.note
       }).eq('id', s.id)
     }))
 
-    // Inserisci nuove serie
+    // Calcola exercise_order massimo esistente
+    const maxOrder = Math.max(0, ...grouped.map(g => g.sets[0]?.exercise_order ?? 0))
+
+    // Inserisci nuove serie per esercizi esistenti
     const toInsert = []
-    grouped.forEach(({ name, sets }) => {
+    grouped.filter(g => !editDeletedExercises.includes(g.name)).forEach(({ name, sets }) => {
       const newS = editNewSets[name] || []
       const exerciseOrder = sets[0]?.exercise_order ?? 0
       const exerciseId = sets[0]?.exercise_id ?? null
@@ -207,19 +296,37 @@ export default function History({ session }) {
         })
       })
     })
+
+    // Inserisci nuovi esercizi
+    editNewExercises.forEach((ex, exIdx) => {
+      ex.sets.forEach((s, i) => {
+        toInsert.push({
+          session_id: selected.id,
+          exercise_name: ex.name,
+          exercise_id: null,
+          exercise_order: maxOrder + exIdx + 1,
+          set_number: i + 1,
+          reps: s.reps,
+          kg: s.kg,
+          note: null,
+          is_pr: false
+        })
+      })
+    })
+
     if (toInsert.length > 0) {
       await supabase.from('session_sets').insert(toInsert)
     }
 
     // Ricalcola volume
-    const allSets = [
-      ...detail.filter(s => editSets[s.id]).map(s => ({
+    const allActiveSets = [
+      ...activeDetail.filter(s => editSets[s.id]).map(s => ({
         kg: parseFloat(editSets[s.id]?.kg) || 0,
         reps: parseInt(editSets[s.id]?.reps) || 0
       })),
       ...toInsert.map(s => ({ kg: s.kg, reps: s.reps }))
     ]
-    const newVolume = allSets.reduce((sum, s) => sum + s.kg * s.reps, 0)
+    const newVolume = allActiveSets.reduce((sum, s) => sum + s.kg * s.reps, 0)
 
     await supabase.from('sessions').update({
       workout_name: editName.trim(),
@@ -232,7 +339,7 @@ export default function History({ session }) {
     setSessions(prev => prev.map(s => s.id === selected.id ? updatedSession : s))
     setEditMode(false)
     setSaving(false)
-    // Ricarica dettaglio aggiornato
+
     const { data } = await supabase
       .from('session_sets')
       .select('*')
@@ -340,6 +447,108 @@ export default function History({ session }) {
 
   if (selected) return (
     <div className="pt-6">
+
+      {/* MODAL CONFERMA ELIMINA ESERCIZIO */}
+      {confirmDeleteEx && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-3xl w-full max-w-[340px] p-6">
+            <div className="text-2xl mb-2">🗑</div>
+            <div className="text-white font-black text-lg mb-1">Eliminare l'esercizio?</div>
+            <div className="text-[#666] text-sm mb-5">
+              Tutte le serie di <span className="text-white font-medium">{confirmDeleteEx}</span> verranno rimosse dalla sessione.
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={() => markDeleteExercise(confirmDeleteEx)}
+                className="w-full bg-red-500/20 text-red-400 border border-red-500/30 font-bold py-3 rounded-xl text-sm"
+              >Elimina esercizio</button>
+              <button
+                onClick={() => setConfirmDeleteEx(null)}
+                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+              >Annulla</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL AGGIUNGI ESERCIZIO */}
+      {showAddExModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowAddExModal(false)}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
+            <div className="text-white font-black text-xl tracking-wide mb-4">AGGIUNGI ESERCIZIO</div>
+
+            <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Esercizio</label>
+            <select
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+              value={addExSelected}
+              onChange={e => setAddExSelected(e.target.value)}
+            >
+              <option value="">— Seleziona esercizio —</option>
+              {getAllExerciseNames().map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+
+            <div className="text-[#666] text-xs uppercase tracking-widest mb-2">Serie</div>
+            <table className="w-full mb-3">
+              <thead>
+                <tr>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-8">Set</th>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Kg</th>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Rip</th>
+                  <th className="w-7"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {addExSets.map((s, i) => (
+                  <tr key={i} className="border-t border-[#1a1a1a]">
+                    <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
+                    <td className="py-2 text-center">
+                      <input
+                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                        type="number" step="2.5" min="0"
+                        value={s.kg}
+                        onChange={e => setAddExSets(prev => prev.map((x, j) => j === i ? { ...x, kg: e.target.value } : x))}
+                      />
+                    </td>
+                    <td className="py-2 text-center">
+                      <input
+                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                        type="number" min="1"
+                        value={s.reps}
+                        onChange={e => setAddExSets(prev => prev.map((x, j) => j === i ? { ...x, reps: e.target.value } : x))}
+                      />
+                    </td>
+                    <td className="py-2 text-center">
+                      <button
+                        onClick={() => setAddExSets(prev => prev.filter((_, j) => j !== i))}
+                        disabled={addExSets.length <= 1}
+                        className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20"
+                      >✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <button
+              onClick={() => setAddExSets(prev => {
+                const last = prev[prev.length - 1]
+                return [...prev, { kg: last?.kg ?? 0, reps: last?.reps ?? 10 }]
+              })}
+              className="w-full py-2 rounded-xl text-xs text-[#e8ff47] border border-[#e8ff47]/20 bg-[#e8ff47]/5 mb-5"
+            >＋ Aggiungi serie</button>
+
+            <button
+              onClick={confirmAddExercise}
+              disabled={!addExSelected}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
+            >＋ Aggiungi alla sessione</button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <button onClick={() => { setSelected(null); setEditMode(false) }} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
         <div className="flex items-center gap-2">
@@ -369,110 +578,166 @@ export default function History({ session }) {
             type="number" min="1" value={editMinutes} onChange={e => setEditMinutes(e.target.value)}
           />
 
-          <div className="text-[#666] text-xs uppercase tracking-widest mb-3">Esercizi e serie</div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[#666] text-xs uppercase tracking-widest">Esercizi e serie</div>
+            <button
+              onClick={() => { setShowAddExModal(true); setAddExSelected(''); setAddExSets([{ kg: 0, reps: 10 }]) }}
+              className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-3 py-1.5 font-bold"
+            >＋ Esercizio</button>
+          </div>
+
           <div className="space-y-4">
-            {groupByExerciseOrdered(detail).map(({ name, sets }) => (
-              <div key={name} className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-                <div className="text-white font-bold mb-3">{name}</div>
+            {/* ESERCIZI ESISTENTI */}
+            {groupByExerciseOrdered(detail).map(({ name, sets }) => {
+              const isDeleted = editDeletedExercises.includes(name)
+              return (
+                <div key={name} className={`rounded-2xl p-4 border transition-all ${isDeleted ? 'bg-red-500/5 border-red-500/20 opacity-50' : 'bg-[#111] border-[#2a2a2a]'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-white font-bold">{name}</div>
+                    {isDeleted ? (
+                      <button
+                        onClick={() => unmarkDeleteExercise(name)}
+                        className="text-xs text-[#e8ff47] border border-[#e8ff47]/30 rounded-lg px-2 py-1"
+                      >↩ Ripristina</button>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmDeleteEx(name)}
+                        className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
+                      >🗑</button>
+                    )}
+                  </div>
 
-                {/* NOTA ESERCIZIO */}
-                <div className="flex items-center gap-2 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 mb-3">
-                  <span className="text-[#444] text-xs flex-shrink-0">📝</span>
-                  <input
-                    className="flex-1 bg-transparent text-white text-xs outline-none placeholder-[#444]"
-                    placeholder="Nota esercizio..."
-                    value={editNotes[name] ?? ''}
-                    onChange={e => setEditNotes(prev => ({ ...prev, [name]: e.target.value }))}
-                  />
+                  {!isDeleted && (
+                    <>
+                      <div className="flex items-center gap-2 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 mb-3">
+                        <span className="text-[#444] text-xs flex-shrink-0">📝</span>
+                        <input
+                          className="flex-1 bg-transparent text-white text-xs outline-none placeholder-[#444]"
+                          placeholder="Nota esercizio..."
+                          value={editNotes[name] ?? ''}
+                          onChange={e => setEditNotes(prev => ({ ...prev, [name]: e.target.value }))}
+                        />
+                      </div>
+
+                      <table className="w-full mb-2">
+                        <thead>
+                          <tr>
+                            <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-8">Set</th>
+                            <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Kg</th>
+                            <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Rip</th>
+                            <th className="w-7"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sets.filter(s => editSets[s.id]).map((s, i) => (
+                            <tr key={s.id} className="border-t border-[#1a1a1a]">
+                              <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
+                              <td className="py-2 text-center">
+                                <input
+                                  className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                                  type="number" step="2.5" min="0"
+                                  value={editSets[s.id]?.kg ?? s.kg}
+                                  onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], kg: e.target.value } }))}
+                                />
+                              </td>
+                              <td className="py-2 text-center">
+                                <input
+                                  className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                                  type="number" min="1"
+                                  value={editSets[s.id]?.reps ?? s.reps}
+                                  onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], reps: e.target.value } }))}
+                                />
+                              </td>
+                              <td className="py-2 text-center">
+                                <button
+                                  onClick={() => removeExistingSet(s.id, name)}
+                                  disabled={sets.filter(x => editSets[x.id]).length <= 1 && (editNewSets[name] || []).length === 0}
+                                  className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20"
+                                >✕</button>
+                              </td>
+                            </tr>
+                          ))}
+
+                          {(editNewSets[name] || []).map((ns, i) => {
+                            const existingCount = sets.filter(s => editSets[s.id]).length
+                            return (
+                              <tr key={`new-${i}`} className="border-t border-[#1a1a1a]">
+                                <td className="py-2 text-center text-[#e8ff47] font-mono text-sm">{existingCount + i + 1}</td>
+                                <td className="py-2 text-center">
+                                  <input
+                                    className="bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                                    type="number" step="2.5" min="0"
+                                    value={ns.kg}
+                                    onChange={e => setEditNewSets(prev => {
+                                      const updated = [...prev[name]]; updated[i] = { ...updated[i], kg: e.target.value }; return { ...prev, [name]: updated }
+                                    })}
+                                  />
+                                </td>
+                                <td className="py-2 text-center">
+                                  <input
+                                    className="bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                                    type="number" min="1"
+                                    value={ns.reps}
+                                    onChange={e => setEditNewSets(prev => {
+                                      const updated = [...prev[name]]; updated[i] = { ...updated[i], reps: e.target.value }; return { ...prev, [name]: updated }
+                                    })}
+                                  />
+                                </td>
+                                <td className="py-2 text-center">
+                                  <button onClick={() => removeNewSet(name, i)}
+                                    className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto">✕</button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+
+                      <button onClick={() => addNewSet(name, sets)}
+                        className="w-full py-1.5 rounded-lg text-xs text-[#e8ff47] border border-[#e8ff47]/20 bg-[#e8ff47]/5">
+                        ＋ Aggiungi serie
+                      </button>
+                    </>
+                  )}
                 </div>
+              )
+            })}
 
-                {/* SERIE ESISTENTI */}
-                <table className="w-full mb-2">
+            {/* NUOVI ESERCIZI */}
+            {editNewExercises.map((ex, exIdx) => (
+              <div key={`newex-${exIdx}`} className="bg-[#111] border border-[#e8ff47]/20 rounded-2xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-white font-bold">{ex.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[#e8ff47] text-xs">nuovo</span>
+                    <button
+                      onClick={() => removeNewExercise(exIdx)}
+                      className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
+                    >🗑</button>
+                  </div>
+                </div>
+                <table className="w-full">
                   <thead>
                     <tr>
                       <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-8">Set</th>
                       <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Kg</th>
                       <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Rip</th>
-                      <th className="w-7"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sets.filter(s => editSets[s.id]).map((s, i) => (
-                      <tr key={s.id} className="border-t border-[#1a1a1a]">
-                        <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
+                    {ex.sets.map((s, i) => (
+                      <tr key={i} className="border-t border-[#1a1a1a]">
+                        <td className="py-2 text-center text-[#e8ff47] font-mono text-sm">{i + 1}</td>
                         <td className="py-2 text-center">
-                          <input
-                            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                            type="number" step="2.5" min="0"
-                            value={editSets[s.id]?.kg ?? s.kg}
-                            onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], kg: e.target.value } }))}
-                          />
+                          <span className="text-[#e8ff47] font-mono font-bold text-sm">{s.kg} kg</span>
                         </td>
                         <td className="py-2 text-center">
-                          <input
-                            className="bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                            type="number" min="1"
-                            value={editSets[s.id]?.reps ?? s.reps}
-                            onChange={e => setEditSets(prev => ({ ...prev, [s.id]: { ...prev[s.id], reps: e.target.value } }))}
-                          />
-                        </td>
-                        <td className="py-2 text-center">
-                          <button
-                            onClick={() => removeExistingSet(s.id)}
-                            disabled={sets.filter(x => editSets[x.id]).length <= 1 && (editNewSets[name] || []).length === 0}
-                            className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20"
-                          >✕</button>
+                          <span className="text-white font-mono text-sm">{s.reps} rip</span>
                         </td>
                       </tr>
                     ))}
-
-                    {/* NUOVE SERIE */}
-                    {(editNewSets[name] || []).map((ns, i) => {
-                      const existingCount = sets.filter(s => editSets[s.id]).length
-                      return (
-                        <tr key={`new-${i}`} className="border-t border-[#1a1a1a]">
-                          <td className="py-2 text-center text-[#e8ff47] font-mono text-sm">{existingCount + i + 1}</td>
-                          <td className="py-2 text-center">
-                            <input
-                              className="bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                              type="number" step="2.5" min="0"
-                              value={ns.kg}
-                              onChange={e => setEditNewSets(prev => {
-                                const updated = [...prev[name]]
-                                updated[i] = { ...updated[i], kg: e.target.value }
-                                return { ...prev, [name]: updated }
-                              })}
-                            />
-                          </td>
-                          <td className="py-2 text-center">
-                            <input
-                              className="bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
-                              type="number" min="1"
-                              value={ns.reps}
-                              onChange={e => setEditNewSets(prev => {
-                                const updated = [...prev[name]]
-                                updated[i] = { ...updated[i], reps: e.target.value }
-                                return { ...prev, [name]: updated }
-                              })}
-                            />
-                          </td>
-                          <td className="py-2 text-center">
-                            <button
-                              onClick={() => removeNewSet(name, i)}
-                              className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto"
-                            >✕</button>
-                          </td>
-                        </tr>
-                      )
-                    })}
                   </tbody>
                 </table>
-
-                {/* AGGIUNGI SERIE */}
-                <button
-                  onClick={() => addNewSet(name, sets)}
-                  className="w-full py-1.5 rounded-lg text-xs text-[#e8ff47] border border-[#e8ff47]/20 bg-[#e8ff47]/5"
-                >＋ Aggiungi serie</button>
               </div>
             ))}
           </div>
