@@ -49,7 +49,7 @@ export default function History({ session }) {
   const [editNewSets, setEditNewSets] = useState({})
   const [editDeletedExercises, setEditDeletedExercises] = useState([])
   const [editNewExercises, setEditNewExercises] = useState([])
-  const [editExerciseOrder, setEditExerciseOrder] = useState([]) // ordine nomi esercizi
+  const [editExerciseOrder, setEditExerciseOrder] = useState([])
   const [saving, setSaving] = useState(false)
   const [showAddExModal, setShowAddExModal] = useState(false)
   const [addExSelected, setAddExSelected] = useState('')
@@ -134,6 +134,22 @@ export default function History({ session }) {
       .map(([name, stats]) => ({ name, maxKg: stats.maxKg, totalVolume: stats.totalVolume }))
       .sort((a, b) => a.name.localeCompare(b.name)))
     setLoadingPRs(false)
+  }
+
+  function exportPRs() {
+    if (prData.length === 0) return
+    const rows = [['Esercizio', 'PR (kg)', 'Volume totale (kg)']]
+    prData.forEach(ex => rows.push([
+      ex.name,
+      ex.maxKg > 0 ? ex.maxKg : '—',
+      ex.totalVolume > 0 ? ex.totalVolume : '—'
+    ]))
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'gymtracker_record.csv'; a.click()
+    URL.revokeObjectURL(url)
   }
 
   async function deleteSession(id) {
@@ -257,11 +273,10 @@ export default function History({ session }) {
 
   function confirmAddExercise() {
     if (!addExSelected || addExSets.length === 0) return
-    const newEx = {
+    setEditNewExercises(prev => [...prev, {
       name: addExSelected,
       sets: addExSets.map(s => ({ kg: parseFloat(s.kg) || 0, reps: parseInt(s.reps) || 0 }))
-    }
-    setEditNewExercises(prev => [...prev, newEx])
+    }])
     setShowAddExModal(false)
     setAddExSelected('')
     setAddExSets([{ kg: 0, reps: 10 }])
@@ -276,7 +291,6 @@ export default function History({ session }) {
     const newDuration = parseInt(editMinutes) * 60
     const grouped = groupByExerciseOrdered(detail)
 
-    // Elimina session_sets degli esercizi rimossi
     for (const exName of editDeletedExercises) {
       const idsToDelete = detail.filter(s => s.exercise_name === exName).map(s => s.id)
       if (idsToDelete.length > 0) {
@@ -284,13 +298,10 @@ export default function History({ session }) {
       }
     }
 
-    // Costruisci l'ordine finale combinando esercizi esistenti e nuovi
     const allExistingNames = editExerciseOrder.filter(n => !editDeletedExercises.includes(n))
     const newExNames = editNewExercises.map(e => e.name)
-    // L'ordine finale: esistenti (riordinati) + nuovi (in fondo, ma mantenendo il loro ordine)
     const finalOrder = [...allExistingNames, ...newExNames]
 
-    // Aggiorna exercise_order per tutti i set degli esercizi esistenti secondo il nuovo ordine
     const activeDetail = detail.filter(s => !editDeletedExercises.includes(s.exercise_name))
     await Promise.all(activeDetail.map(s => {
       const val = editSets[s.id]
@@ -304,7 +315,6 @@ export default function History({ session }) {
       }).eq('id', s.id)
     }))
 
-    // Inserisci nuove serie per esercizi esistenti
     const toInsert = []
     grouped.filter(g => !editDeletedExercises.includes(g.name)).forEach(({ name, sets }) => {
       const newS = editNewSets[name] || []
@@ -325,7 +335,6 @@ export default function History({ session }) {
       })
     })
 
-    // Inserisci nuovi esercizi
     editNewExercises.forEach((ex) => {
       const exerciseOrder = finalOrder.indexOf(ex.name)
       ex.sets.forEach((s, i) => {
@@ -347,7 +356,6 @@ export default function History({ session }) {
       await supabase.from('session_sets').insert(toInsert)
     }
 
-    // Ricalcola volume
     const allActiveSets = [
       ...activeDetail.filter(s => editSets[s.id]).map(s => ({
         kg: parseFloat(editSets[s.id]?.kg) || 0,
@@ -436,15 +444,29 @@ export default function History({ session }) {
 
   if (showStats) return (
     <div className="pt-6">
-      <button onClick={() => setShowStats(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Cronologia</button>
+      <button onClick={() => setShowStats(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Storico</button>
       <Stats session={session} />
     </div>
   )
 
   if (showPRs) return (
     <div className="pt-6">
-      <button onClick={() => setShowPRs(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Cronologia</button>
-      <div className="text-[#e8ff47] text-3xl font-black tracking-wide mb-1">RECORD</div>
+      <button onClick={() => setShowPRs(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Storico</button>
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-[#e8ff47] text-3xl font-black tracking-wide">RECORD</div>
+        <button
+          onClick={exportPRs}
+          disabled={prData.length === 0}
+          className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] flex items-center justify-center disabled:opacity-30"
+          title="Esporta Record CSV"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="18" height="18" rx="2" fill="#1d6f42"/>
+            <path d="M7 8h2.5M7 12h2.5M7 16h2.5M12 8h5M12 12h5M12 16h5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+            <path d="M10 8v8" stroke="white" strokeWidth="1" opacity="0.4"/>
+          </svg>
+        </button>
+      </div>
       <div className="text-[#666] text-xs uppercase tracking-widest mb-5">Personal best per esercizio</div>
       {loadingPRs ? <div className="text-[#666] text-sm">Caricamento...</div> : prData.length === 0 ? (
         <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
@@ -566,7 +588,7 @@ export default function History({ session }) {
       )}
 
       <div className="flex items-center justify-between mb-4">
-        <button onClick={() => { setSelected(null); setEditMode(false) }} className="text-[#666] text-sm flex items-center gap-1">← Cronologia</button>
+        <button onClick={() => { setSelected(null); setEditMode(false) }} className="text-[#666] text-sm flex items-center gap-1">← Storico</button>
         <div className="flex items-center gap-2">
           {!editMode && (
             <>
@@ -592,14 +614,13 @@ export default function History({ session }) {
 
           <div className="flex items-center justify-between mb-3">
             <div className="text-[#666] text-xs uppercase tracking-widest">Esercizi e serie</div>
-            <button
-              onClick={() => { setShowAddExModal(true); setAddExSelected(''); setAddExSets([{ kg: 0, reps: 10 }]) }}
-              className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-3 py-1.5 font-bold"
-            >＋ Esercizio</button>
+            <button onClick={() => { setShowAddExModal(true); setAddExSelected(''); setAddExSets([{ kg: 0, reps: 10 }]) }}
+              className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-3 py-1.5 font-bold">
+              ＋ Esercizio
+            </button>
           </div>
 
           <div className="space-y-4">
-            {/* ESERCIZI ESISTENTI — in ordine editExerciseOrder */}
             {editExerciseOrder.map((name, orderIdx) => {
               const group = groupByExerciseOrdered(detail).find(g => g.name === name)
               if (!group) return null
@@ -607,14 +628,12 @@ export default function History({ session }) {
               const isDeleted = editDeletedExercises.includes(name)
               const totalExisting = editExerciseOrder.length
               const totalNew = editNewExercises.length
-              const totalAll = totalExisting + totalNew
 
               return (
                 <div key={name} className={`rounded-2xl p-4 border transition-all ${isDeleted ? 'bg-red-500/5 border-red-500/20 opacity-50' : 'bg-[#111] border-[#2a2a2a]'}`}>
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-white font-bold flex-1">{name}</div>
                     <div className="flex items-center gap-1">
-                      {/* FRECCE RIORDINO */}
                       {!isDeleted && (
                         <div className="flex flex-col gap-0.5 mr-1">
                           <button onClick={() => moveExercise(name, -1)} disabled={orderIdx === 0}
@@ -711,7 +730,6 @@ export default function History({ session }) {
               )
             })}
 
-            {/* NUOVI ESERCIZI */}
             {editNewExercises.map((ex, exIdx) => (
               <div key={`newex-${exIdx}`} className="bg-[#111] border border-[#e8ff47]/20 rounded-2xl p-4">
                 <div className="flex items-center justify-between mb-3">
