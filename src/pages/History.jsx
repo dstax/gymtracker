@@ -56,6 +56,7 @@ export default function History({ session }) {
   const [addExSets, setAddExSets] = useState([{ kg: 0, reps: 10 }])
   const [confirmDeleteEx, setConfirmDeleteEx] = useState(null)
   const [customExercises, setCustomExercises] = useState([])
+  const [prCopied, setPrCopied] = useState(false)
 
   useEffect(() => {
     fetchSessions()
@@ -136,20 +137,48 @@ export default function History({ session }) {
     setLoadingPRs(false)
   }
 
-  function exportPRs() {
+  async function sharePRs() {
     if (prData.length === 0) return
-    const rows = [['Esercizio', 'PR (kg)', 'Volume totale (kg)']]
-    prData.forEach(ex => rows.push([
-      ex.name,
-      ex.maxKg > 0 ? ex.maxKg : '—',
-      ex.totalVolume > 0 ? ex.totalVolume : '—'
-    ]))
-    const csv = rows.map(r => r.join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'gymtracker_record.csv'; a.click()
-    URL.revokeObjectURL(url)
+
+    const today = new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })
+    let text = `🏆 *RECORD PERSONALI*\n`
+    text += `📅 ${today}\n\n`
+    prData.forEach(ex => {
+      text += `*${ex.name}*\n`
+      if (ex.maxKg > 0) text += `  PR: ${ex.maxKg} kg\n`
+      if (ex.totalVolume > 0) {
+        const vol = ex.totalVolume >= 1000
+          ? (ex.totalVolume / 1000).toFixed(1) + 't'
+          : ex.totalVolume + ' kg'
+        text += `  Volume totale: ${vol}\n`
+      }
+      text += `\n`
+    })
+    text += `_Inviato da GymTracker 💪_`
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ text })
+        return
+      } catch { /* fallback */ }
+    }
+
+    try {
+      await navigator.clipboard.writeText(text)
+      setPrCopied(true)
+      setTimeout(() => setPrCopied(false), 2500)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setPrCopied(true)
+      setTimeout(() => setPrCopied(false), 2500)
+    }
   }
 
   async function deleteSession(id) {
@@ -451,23 +480,34 @@ export default function History({ session }) {
 
   if (showPRs) return (
     <div className="pt-6">
+
+      {/* TOAST COPIATO */}
+      {prCopied && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#e8ff47] text-black text-xs font-bold px-4 py-2 rounded-xl shadow-lg">
+          Testo copiato — incollalo su WhatsApp!
+        </div>
+      )}
+
       <button onClick={() => setShowPRs(false)} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Storico</button>
       <div className="flex items-center justify-between mb-1">
         <div className="text-[#e8ff47] text-3xl font-black tracking-wide">RECORD</div>
         <button
-          onClick={exportPRs}
+          onClick={sharePRs}
           disabled={prData.length === 0}
           className="w-10 h-10 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] flex items-center justify-center disabled:opacity-30"
-          title="Esporta Record CSV"
+          title="Condividi Record"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <rect x="3" y="3" width="18" height="18" rx="2" fill="#1d6f42"/>
-            <path d="M7 8h2.5M7 12h2.5M7 16h2.5M12 8h5M12 12h5M12 16h5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-            <path d="M10 8v8" stroke="white" strokeWidth="1" opacity="0.4"/>
-          </svg>
+          {prCopied
+            ? <span className="text-green-400 text-xs font-bold">✓</span>
+            : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#888]">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+          }
         </button>
       </div>
       <div className="text-[#666] text-xs uppercase tracking-widest mb-5">Personal best per esercizio</div>
+
       {loadingPRs ? <div className="text-[#666] text-sm">Caricamento...</div> : prData.length === 0 ? (
         <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
           <p className="text-[#666] text-sm">Nessun dato ancora. Completa qualche sessione!</p>
