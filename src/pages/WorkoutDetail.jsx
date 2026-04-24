@@ -93,7 +93,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   async function copyLastSession() {
     setLoadingLastSession(true)
 
-    // Trova l'ultima sessione per questa scheda
     const { data: lastSessions } = await supabase
       .from('sessions')
       .select('id')
@@ -110,7 +109,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
 
     const lastSessionId = lastSessions[0].id
 
-    // Recupera i set dell'ultima sessione
     const { data: lastSets } = await supabase
       .from('session_sets')
       .select('exercise_name, set_number, kg, reps')
@@ -120,7 +118,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
 
     if (!lastSets || lastSets.length === 0) {
       setLoadingLastSession(false)
-      alert('Nessun dato trovato nell\'ultima sessione.')
+      alert("Nessun dato trovato nell'ultima sessione.")
       return
     }
 
@@ -131,31 +129,61 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
       lastMap[s.exercise_name].push({ kg: s.kg, reps: s.reps })
     })
 
-    // Aggiorna i set degli esercizi nella scheda
-    const updatedExercises = exercises.map(ex => {
+    // Per ogni esercizio della scheda, aggiorna le serie adattando il numero
+    const updatedExercises = []
+    const dbOps = []
+
+    for (const ex of exercises) {
       const lastData = lastMap[ex.name]
-      if (!lastData) return ex
-      const updatedSets = ex.sets?.sort((a, b) => a.position - b.position).map((s, i) => ({
+      if (!lastData) { updatedExercises.push(ex); continue }
+
+      const currentSets = ex.sets?.sort((a, b) => a.position - b.position) || []
+      const lastCount = lastData.length
+      const currentCount = currentSets.length
+
+      // Aggiorna le serie esistenti
+      const updatedSets = currentSets.map((s, i) => ({
         ...s,
         kg: lastData[i]?.kg ?? s.kg,
         reps: lastData[i]?.reps ?? s.reps
-      })) || []
-      return { ...ex, sets: updatedSets }
-    })
+      }))
 
-    // Salva su DB
-    await Promise.all(updatedExercises.flatMap(ex => {
-      const lastData = lastMap[ex.name]
-      if (!lastData) return []
-      return ex.sets?.map((s, i) =>
-        supabase.from('sets').update({
-          kg: lastData[i]?.kg ?? s.kg,
-          reps: lastData[i]?.reps ?? s.reps
-        }).eq('id', s.id)
-      ) || []
-    }))
+      // Aggiorna le serie esistenti su DB
+      updatedSets.forEach((s, i) => {
+        dbOps.push(
+          supabase.from('sets').update({
+            kg: lastData[i]?.kg ?? s.kg,
+            reps: lastData[i]?.reps ?? s.reps
+          }).eq('id', s.id)
+        )
+      })
 
-    setExercises(updatedExercises)
+      // Se l'ultima sessione aveva più serie, inserisci quelle mancanti
+      if (lastCount > currentCount) {
+        const toInsert = lastData.slice(currentCount).map((d, i) => ({
+          exercise_id: ex.id,
+          kg: d.kg,
+          reps: d.reps,
+          position: currentCount + i
+        }))
+        dbOps.push(supabase.from('sets').insert(toInsert))
+      }
+
+      // Se l'ultima sessione aveva meno serie, elimina quelle in eccesso
+      if (lastCount < currentCount) {
+        const toDelete = currentSets.slice(lastCount).map(s => s.id)
+        dbOps.push(supabase.from('sets').delete().in('id', toDelete))
+        updatedSets.splice(lastCount)
+      }
+
+      updatedExercises.push({ ...ex, sets: updatedSets.slice(0, lastCount) })
+    }
+
+    await Promise.all(dbOps)
+
+    // Ricarica da DB per avere i dati aggiornati (incluse le nuove serie inserite)
+    await fetchExercises()
+
     setLastSessionApplied(true)
     setLoadingLastSession(false)
     setTimeout(() => setLastSessionApplied(false), 3000)
@@ -346,11 +374,11 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
             {loadingLastSession ? (
               <span className="text-[#666]">Caricamento...</span>
             ) : lastSessionApplied ? (
-              <span className="text-green-400">✓ Pesi copiati dall'ultima sessione!</span>
+              <span className="text-green-400">✓ Serie, rip e pesi copiati dall'ultima sessione!</span>
             ) : (
               <>
                 <span className="text-[#666]">📋</span>
-                <span className="text-[#888]">Copia pesi ultima sessione</span>
+                <span className="text-[#888]">Copia serie, rip e pesi dall'ultima sessione</span>
               </>
             )}
           </button>
