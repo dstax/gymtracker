@@ -57,6 +57,9 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   const [savingCustomEdit, setSavingCustomEdit] = useState(false)
   const [loadingLastSession, setLoadingLastSession] = useState(false)
   const [lastSessionApplied, setLastSessionApplied] = useState(false)
+  // Modal di conferma per copia sessione
+  const [showCopyConfirm, setShowCopyConfirm] = useState(false)
+  const [copyPreview, setCopyPreview] = useState(null) // { toAdd, toRemove, lastMap, sessionOrder }
 
   useEffect(() => {
     fetchExercises()
@@ -90,7 +93,8 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     if (data) setCustomExercises(data)
   }
 
-  async function copyLastSession() {
+  // Fase 1: carica dati ultima sessione e mostra preview
+  async function prepareLastSessionCopy() {
     setLoadingLastSession(true)
 
     const { data: lastSessions } = await supabase
@@ -107,12 +111,10 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
       return
     }
 
-    const lastSessionId = lastSessions[0].id
-
     const { data: lastSets } = await supabase
       .from('session_sets')
-      .select('exercise_name, set_number, kg, reps')
-      .eq('session_id', lastSessionId)
+      .select('exercise_name, set_number, kg, reps, exercise_order')
+      .eq('session_id', lastSessions[0].id)
       .order('exercise_order', { ascending: true })
       .order('set_number', { ascending: true })
 
@@ -122,43 +124,105 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
       return
     }
 
-    // Costruisci mappa: exercise_name -> [{ kg, reps }]
+    // Costruisci mappa e ordine dalla sessione
     const lastMap = {}
+    const sessionOrder = []
     lastSets.forEach(s => {
-      if (!lastMap[s.exercise_name]) lastMap[s.exercise_name] = []
+      if (!lastMap[s.exercise_name]) {
+        lastMap[s.exercise_name] = []
+        sessionOrder.push(s.exercise_name)
+      }
       lastMap[s.exercise_name].push({ kg: s.kg, reps: s.reps })
     })
 
-    // Per ogni esercizio della scheda, aggiorna le serie adattando il numero
-    const updatedExercises = []
-    const dbOps = []
+    const currentNames = exercises.map(e => e.name)
+    const sessionNames = sessionOrder
 
-    for (const ex of exercises) {
+    const toAdd = sessionNames.filter(n => !currentNames.includes(n))
+    const toRemove = currentNames.filter(n => !sessionNames.includes(n))
+
+    setLoadingLastSession(false)
+
+    // Se non ci sono esercizi da aggiungere o rimuovere, procedi direttamente
+    if (toAdd.length === 0 && toRemove.length === 0) {
+      await applyLastSessionCopy(lastMap, sessionOrder, [], [])
+      return
+    }
+
+    // Altrimenti mostra la conferma
+    setCopyPreview({ toAdd, toRemove, lastMap, sessionOrder })
+    setShowCopyConfirm(true)
+  }
+
+  // Fase 2: applicazione effettiva dopo conferma
+  async function applyLastSessionCopy(lastMap, sessionOrder, toAdd, toRemove) {
+    setShowCopyConfirm(false)
+    setLoadingLastSession(true)
+
+    const dbOps = []
+    let currentExercises = [...exercises]
+
+    // 1. Rimuovi esercizi non presenti nell'ultima sessione
+    for (const name of toRemove) {
+      const ex = currentExercises.find(e => e.name === name)
+      if (ex) {
+        await supabase.from('exercises').delete().eq('id', ex.id)
+        currentExercises = currentExercises.filter(e => e.name !== name)
+      }
+    }
+
+    // 2. Aggiungi esercizi nuovi con le loro serie
+    for (const name of toAdd) {
+      const setsData = lastMap[name] || []
+      const allEx = [...DEFAULT_EXERCISES, ...customExercises.map(e => ({ name: e.name, machine: e.machine || '' }))]
+      const found = allEx.find(e => e.name === name)
+      const machine = found?.machine || ''
+
+      const { data: newEx } = await supabase
+        .from('exercises')
+        .insert({
+          workout_id: workout.id,
+          name,
+          machine,
+          position: 999, // verrà riordinato dopo
+          note: null
+        })
+        .select().single()
+
+      if (newEx) {
+        const setsToInsert = setsData.map((s, i) => ({
+          exercise_id: newEx.id,
+          kg: s.kg,
+          reps: s.reps,
+          position: i
+        }))
+        if (setsToInsert.length > 0) {
+          await supabase.from('sets').insert(setsToInsert)
+        }
+        currentExercises.push({ ...newEx, sets: setsToInsert })
+      }
+    }
+
+    // 3. Aggiorna serie degli esercizi esistenti (quelli in comune)
+    for (const ex of currentExercises) {
       const lastData = lastMap[ex.name]
-      if (!lastData) { updatedExercises.push(ex); continue }
+      if (!lastData) continue
 
       const currentSets = ex.sets?.sort((a, b) => a.position - b.position) || []
       const lastCount = lastData.length
       const currentCount = currentSets.length
 
-      // Aggiorna le serie esistenti
-      const updatedSets = currentSets.map((s, i) => ({
-        ...s,
-        kg: lastData[i]?.kg ?? s.kg,
-        reps: lastData[i]?.reps ?? s.reps
-      }))
-
-      // Aggiorna le serie esistenti su DB
-      updatedSets.forEach((s, i) => {
+      // Aggiorna serie esistenti
+      currentSets.slice(0, Math.min(currentCount, lastCount)).forEach((s, i) => {
         dbOps.push(
           supabase.from('sets').update({
-            kg: lastData[i]?.kg ?? s.kg,
-            reps: lastData[i]?.reps ?? s.reps
+            kg: lastData[i].kg,
+            reps: lastData[i].reps
           }).eq('id', s.id)
         )
       })
 
-      // Se l'ultima sessione aveva più serie, inserisci quelle mancanti
+      // Inserisci serie mancanti
       if (lastCount > currentCount) {
         const toInsert = lastData.slice(currentCount).map((d, i) => ({
           exercise_id: ex.id,
@@ -169,21 +233,40 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
         dbOps.push(supabase.from('sets').insert(toInsert))
       }
 
-      // Se l'ultima sessione aveva meno serie, elimina quelle in eccesso
+      // Elimina serie in eccesso
       if (lastCount < currentCount) {
         const toDelete = currentSets.slice(lastCount).map(s => s.id)
         dbOps.push(supabase.from('sets').delete().in('id', toDelete))
-        updatedSets.splice(lastCount)
       }
-
-      updatedExercises.push({ ...ex, sets: updatedSets.slice(0, lastCount) })
     }
 
     await Promise.all(dbOps)
 
-    // Ricarica da DB per avere i dati aggiornati (incluse le nuove serie inserite)
-    await fetchExercises()
+    // 4. Riordina gli esercizi secondo l'ordine della sessione
+    // Prima ricarica per avere tutti gli id aggiornati
+    const { data: freshExercises } = await supabase
+      .from('exercises')
+      .select('id, name')
+      .eq('workout_id', workout.id)
 
+    if (freshExercises) {
+      // Esercizi nell'ordine della sessione + eventuali rimasti fuori dall'ordine
+      const ordered = []
+      sessionOrder.forEach(name => {
+        const found = freshExercises.find(e => e.name === name)
+        if (found) ordered.push(found)
+      })
+      // Aggiungi eventuali esercizi della scheda non presenti nella sessione (non dovrebbero esserci dopo il sync)
+      freshExercises.forEach(e => {
+        if (!ordered.find(o => o.id === e.id)) ordered.push(e)
+      })
+
+      await Promise.all(ordered.map((ex, i) =>
+        supabase.from('exercises').update({ position: i }).eq('id', ex.id)
+      ))
+    }
+
+    await fetchExercises()
     setLastSessionApplied(true)
     setLoadingLastSession(false)
     setTimeout(() => setLastSessionApplied(false), 3000)
@@ -348,6 +431,76 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
 
   return (
     <div className="pt-6">
+
+      {/* MODAL CONFERMA COPIA SESSIONE */}
+      {showCopyConfirm && copyPreview && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-3xl w-full max-w-[380px] p-6 max-h-[80vh] overflow-y-auto">
+            <div className="text-2xl mb-2">📋</div>
+            <div className="text-white font-black text-xl mb-1">Copia ultima sessione</div>
+            <div className="text-[#666] text-sm mb-4">
+              Per allineare la scheda all'ultima sessione verranno apportate queste modifiche:
+            </div>
+
+            {copyPreview.toAdd.length > 0 && (
+              <div className="mb-3">
+                <div className="text-green-400 text-xs uppercase tracking-widest font-bold mb-2">
+                  ＋ Esercizi da aggiungere ({copyPreview.toAdd.length})
+                </div>
+                <div className="space-y-1">
+                  {copyPreview.toAdd.map(name => (
+                    <div key={name} className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-1.5">
+                      <span className="text-green-400 text-xs">＋</span>
+                      <span className="text-white text-sm">{name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {copyPreview.toRemove.length > 0 && (
+              <div className="mb-4">
+                <div className="text-red-400 text-xs uppercase tracking-widest font-bold mb-2">
+                  − Esercizi da rimuovere ({copyPreview.toRemove.length})
+                </div>
+                <div className="space-y-1">
+                  {copyPreview.toRemove.map(name => (
+                    <div key={name} className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-1.5">
+                      <span className="text-red-400 text-xs">−</span>
+                      <span className="text-white text-sm">{name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="text-[#444] text-xs mb-5">
+              Serie, ripetizioni e pesi verranno copiati per tutti gli esercizi. L'ordine sarà quello dell'ultima sessione.
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => applyLastSessionCopy(
+                  copyPreview.lastMap,
+                  copyPreview.sessionOrder,
+                  copyPreview.toAdd,
+                  copyPreview.toRemove
+                )}
+                className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm"
+              >
+                ✓ Conferma e applica
+              </button>
+              <button
+                onClick={() => { setShowCopyConfirm(false); setCopyPreview(null) }}
+                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+              >
+                Annulla
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <button onClick={onBack} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Schede</button>
 
       <div className="flex items-start justify-between">
@@ -367,18 +520,18 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
 
         {exercises.length > 0 && (
           <button
-            onClick={copyLastSession}
+            onClick={prepareLastSessionCopy}
             disabled={loadingLastSession}
             className="w-full py-2.5 rounded-xl text-sm font-semibold border border-[#2a2a2a] bg-[#1a1a1a] disabled:opacity-40 flex items-center justify-center gap-2"
           >
             {loadingLastSession ? (
               <span className="text-[#666]">Caricamento...</span>
             ) : lastSessionApplied ? (
-              <span className="text-green-400">✓ Serie, rip e pesi copiati dall'ultima sessione!</span>
+              <span className="text-green-400">✓ Scheda aggiornata dall'ultima sessione!</span>
             ) : (
               <>
                 <span className="text-[#666]">📋</span>
-                <span className="text-[#888]">Copia serie, rip e pesi dall'ultima sessione</span>
+                <span className="text-[#888]">Copia dall'ultima sessione</span>
               </>
             )}
           </button>
