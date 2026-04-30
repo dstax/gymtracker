@@ -11,6 +11,11 @@ export default function Home({ session }) {
   const [scheduled, setScheduled] = useState([])
   const [directWorkout, setDirectWorkout] = useState(null)
   const [directScheduledId, setDirectScheduledId] = useState(null)
+  const [editingSchedule, setEditingSchedule] = useState(null) // { id, workout_name, scheduled_date }
+  const [editDate, setEditDate] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  const today = new Date().toISOString().split('T')[0]
 
   useEffect(() => {
     getProfile()
@@ -27,7 +32,6 @@ export default function Home({ session }) {
   }
 
   async function getScheduled() {
-    const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase
       .from('scheduled_workouts')
       .select('*, workouts(*)')
@@ -38,14 +42,34 @@ export default function Home({ session }) {
     if (data) setScheduled(data)
   }
 
+  async function saveEditDate() {
+    if (!editDate || !editingSchedule) return
+    setSavingEdit(true)
+    await supabase
+      .from('scheduled_workouts')
+      .update({ scheduled_date: editDate })
+      .eq('id', editingSchedule.id)
+    setSavingEdit(false)
+    setEditingSchedule(null)
+    setEditDate('')
+    getScheduled()
+  }
+
+  async function deleteEditSchedule() {
+    if (!editingSchedule) return
+    if (!confirm('Eliminare questa data programmata?')) return
+    await supabase.from('scheduled_workouts').delete().eq('id', editingSchedule.id)
+    setEditingSchedule(null)
+    setEditDate('')
+    getScheduled()
+  }
+
   function formatScheduledDate(dateStr) {
     const date = new Date(dateStr + 'T00:00:00')
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const tomorrow = new Date(today)
-    tomorrow.setDate(today.getDate() + 1)
-    if (date.getTime() === today.getTime()) return 'Oggi'
-    if (date.getTime() === tomorrow.getTime()) return 'Domani'
+    const t = new Date(); t.setHours(0,0,0,0)
+    const tom = new Date(t); tom.setDate(t.getDate() + 1)
+    if (date.getTime() === t.getTime()) return 'Oggi'
+    if (date.getTime() === tom.getTime()) return 'Domani'
     return date.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })
   }
 
@@ -66,6 +90,53 @@ export default function Home({ session }) {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white max-w-[430px] mx-auto relative flex flex-col">
+
+      {/* MODAL MODIFICA DATA PROGRAMMATA */}
+      {editingSchedule && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-3xl w-full max-w-[360px] p-6">
+            <div className="text-2xl mb-2">📅</div>
+            <div className="text-white font-black text-xl mb-1">Modifica data</div>
+            <div className="text-[#666] text-sm mb-5">
+              <span className="text-white font-medium">{editingSchedule.workout_name}</span>
+              <span className="text-[#444] text-xs block mt-1 capitalize">
+                Attuale: {formatScheduledDate(editingSchedule.scheduled_date)}
+              </span>
+            </div>
+
+            <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nuova data</label>
+            <input
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-5"
+              type="date"
+              min={today}
+              value={editDate}
+              onChange={e => setEditDate(e.target.value)}
+            />
+
+            <div className="space-y-3">
+              <button
+                onClick={saveEditDate}
+                disabled={savingEdit || !editDate}
+                className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50"
+              >
+                {savingEdit ? 'Salvataggio...' : '✓ Salva nuova data'}
+              </button>
+              <button
+                onClick={deleteEditSchedule}
+                className="w-full py-3 rounded-xl text-sm font-semibold bg-red-500/10 border border-red-500/30 text-red-400"
+              >
+                🗑 Elimina questa data
+              </button>
+              <button
+                onClick={() => { setEditingSchedule(null); setEditDate('') }}
+                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
+              >
+                Annulla
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto pb-24 px-5">
 
@@ -90,13 +161,13 @@ export default function Home({ session }) {
                 <div className="space-y-3">
                   <div className="text-[#999] text-xs uppercase tracking-widest mb-2">Prossimi allenamenti</div>
                   {scheduled.map(s => (
-                    <div
-                      key={s.id}
-                      onClick={() => { setDirectWorkout(s.workouts); setDirectScheduledId(s.id) }}
-                      className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl cursor-pointer active:scale-[.98] transition-transform"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
+                    <div key={s.id} className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+                      <div className="flex items-start justify-between gap-3">
+                        {/* Area click per iniziare */}
+                        <div
+                          className="flex-1 cursor-pointer active:opacity-70 transition-opacity"
+                          onClick={() => { setDirectWorkout(s.workouts); setDirectScheduledId(s.id) }}
+                        >
                           <div className="text-[#e8ff47] text-xs uppercase tracking-widest font-bold capitalize">
                             {formatScheduledDate(s.scheduled_date)}
                           </div>
@@ -105,9 +176,19 @@ export default function Home({ session }) {
                           </div>
                           <div className="text-[#666] text-xs mt-1">Tocca per iniziare →</div>
                         </div>
-                        <div className="text-2xl">
-                          {s.is_recurring ? '🔁' : '📅'}
-                        </div>
+                        {/* Pulsante modifica data */}
+                        <button
+                          onClick={() => {
+                            setEditingSchedule({
+                              id: s.id,
+                              workout_name: s.workouts?.name,
+                              scheduled_date: s.scheduled_date
+                            })
+                            setEditDate(s.scheduled_date)
+                          }}
+                          className="w-9 h-9 rounded-xl border border-[#2a2a2a] bg-[#1a1a1a] text-base flex items-center justify-center flex-shrink-0 mt-0.5"
+                          title="Modifica data"
+                        >📅</button>
                       </div>
                     </div>
                   ))}
@@ -119,7 +200,6 @@ export default function Home({ session }) {
 
         {page === 'workouts' && <Workouts session={session} onScheduleUpdate={getScheduled} />}
         {page === 'history' && <History session={session} />}
-
         {page === 'profile' && (
           <Profile
             session={session}
@@ -131,10 +211,10 @@ export default function Home({ session }) {
 
       <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-[#111] border-t border-[#2a2a2a] flex py-2">
         {[
-          { id: 'home', icon: '🏠', label: 'Home' },
+          { id: 'home',     icon: '🏠', label: 'Home' },
           { id: 'workouts', icon: '📋', label: 'Schede' },
-          { id: 'history', icon: '📊', label: 'Storico' },
-          { id: 'profile', icon: '👤', label: 'Profilo' },
+          { id: 'history',  icon: '📊', label: 'Storico' },
+          { id: 'profile',  icon: '👤', label: 'Profilo' },
         ].map(item => (
           <button
             key={item.id}
