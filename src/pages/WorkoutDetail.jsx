@@ -57,9 +57,9 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   const [savingCustomEdit, setSavingCustomEdit] = useState(false)
   const [loadingLastSession, setLoadingLastSession] = useState(false)
   const [lastSessionApplied, setLastSessionApplied] = useState(false)
-  // Modal di conferma per copia sessione
   const [showCopyConfirm, setShowCopyConfirm] = useState(false)
-  const [copyPreview, setCopyPreview] = useState(null) // { toAdd, toRemove, lastMap, sessionOrder }
+  const [copyPreview, setCopyPreview] = useState(null)
+  const [shared, setShared] = useState(false)
 
   useEffect(() => {
     fetchExercises()
@@ -93,7 +93,38 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     if (data) setCustomExercises(data)
   }
 
-  // Fase 1: carica dati ultima sessione e mostra preview
+  async function shareWorkout() {
+    let text = `💪 *${workout.name.toUpperCase()}*\n`
+    if (workout.target_muscles) text += `🎯 ${workout.target_muscles}\n`
+    text += `\n`
+    exercises.forEach(ex => {
+      text += `*${ex.name}*`
+      if (ex.machine) text += ` — ${ex.machine}`
+      text += `\n`
+      const sorted = ex.sets?.sort((a, b) => a.position - b.position) || []
+      sorted.forEach((s, i) => {
+        text += `  Serie ${i + 1}: ${s.reps} rip × ${s.kg} kg\n`
+      })
+      if (ex.note) text += `  📝 ${ex.note}\n`
+      text += `\n`
+    })
+    text += `_Inviato da GymTracker 💪_`
+
+    if (navigator.share) {
+      try { await navigator.share({ text }); return } catch { /* fallback */ }
+    }
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta); ta.select()
+      document.execCommand('copy'); document.body.removeChild(ta)
+    }
+    setShared(true)
+    setTimeout(() => setShared(false), 2500)
+  }
+
   async function prepareLastSessionCopy() {
     setLoadingLastSession(true)
 
@@ -124,7 +155,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
       return
     }
 
-    // Costruisci mappa e ordine dalla sessione
     const lastMap = {}
     const sessionOrder = []
     lastSets.forEach(s => {
@@ -136,25 +166,20 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     })
 
     const currentNames = exercises.map(e => e.name)
-    const sessionNames = sessionOrder
-
-    const toAdd = sessionNames.filter(n => !currentNames.includes(n))
-    const toRemove = currentNames.filter(n => !sessionNames.includes(n))
+    const toAdd = sessionOrder.filter(n => !currentNames.includes(n))
+    const toRemove = currentNames.filter(n => !sessionOrder.includes(n))
 
     setLoadingLastSession(false)
 
-    // Se non ci sono esercizi da aggiungere o rimuovere, procedi direttamente
     if (toAdd.length === 0 && toRemove.length === 0) {
       await applyLastSessionCopy(lastMap, sessionOrder, [], [])
       return
     }
 
-    // Altrimenti mostra la conferma
     setCopyPreview({ toAdd, toRemove, lastMap, sessionOrder })
     setShowCopyConfirm(true)
   }
 
-  // Fase 2: applicazione effettiva dopo conferma
   async function applyLastSessionCopy(lastMap, sessionOrder, toAdd, toRemove) {
     setShowCopyConfirm(false)
     setLoadingLastSession(true)
@@ -162,7 +187,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     const dbOps = []
     let currentExercises = [...exercises]
 
-    // 1. Rimuovi esercizi non presenti nell'ultima sessione
     for (const name of toRemove) {
       const ex = currentExercises.find(e => e.name === name)
       if (ex) {
@@ -171,7 +195,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
       }
     }
 
-    // 2. Aggiungi esercizi nuovi con le loro serie
     for (const name of toAdd) {
       const setsData = lastMap[name] || []
       const allEx = [...DEFAULT_EXERCISES, ...customExercises.map(e => ({ name: e.name, machine: e.machine || '' }))]
@@ -180,90 +203,49 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
 
       const { data: newEx } = await supabase
         .from('exercises')
-        .insert({
-          workout_id: workout.id,
-          name,
-          machine,
-          position: 999, // verrà riordinato dopo
-          note: null
-        })
+        .insert({ workout_id: workout.id, name, machine, position: 999, note: null })
         .select().single()
 
       if (newEx) {
-        const setsToInsert = setsData.map((s, i) => ({
-          exercise_id: newEx.id,
-          kg: s.kg,
-          reps: s.reps,
-          position: i
-        }))
-        if (setsToInsert.length > 0) {
-          await supabase.from('sets').insert(setsToInsert)
-        }
+        const setsToInsert = setsData.map((s, i) => ({ exercise_id: newEx.id, kg: s.kg, reps: s.reps, position: i }))
+        if (setsToInsert.length > 0) await supabase.from('sets').insert(setsToInsert)
         currentExercises.push({ ...newEx, sets: setsToInsert })
       }
     }
 
-    // 3. Aggiorna serie degli esercizi esistenti (quelli in comune)
     for (const ex of currentExercises) {
       const lastData = lastMap[ex.name]
       if (!lastData) continue
-
       const currentSets = ex.sets?.sort((a, b) => a.position - b.position) || []
       const lastCount = lastData.length
       const currentCount = currentSets.length
 
-      // Aggiorna serie esistenti
       currentSets.slice(0, Math.min(currentCount, lastCount)).forEach((s, i) => {
-        dbOps.push(
-          supabase.from('sets').update({
-            kg: lastData[i].kg,
-            reps: lastData[i].reps
-          }).eq('id', s.id)
-        )
+        dbOps.push(supabase.from('sets').update({ kg: lastData[i].kg, reps: lastData[i].reps }).eq('id', s.id))
       })
-
-      // Inserisci serie mancanti
       if (lastCount > currentCount) {
-        const toInsert = lastData.slice(currentCount).map((d, i) => ({
-          exercise_id: ex.id,
-          kg: d.kg,
-          reps: d.reps,
-          position: currentCount + i
-        }))
-        dbOps.push(supabase.from('sets').insert(toInsert))
+        dbOps.push(supabase.from('sets').insert(
+          lastData.slice(currentCount).map((d, i) => ({ exercise_id: ex.id, kg: d.kg, reps: d.reps, position: currentCount + i }))
+        ))
       }
-
-      // Elimina serie in eccesso
       if (lastCount < currentCount) {
-        const toDelete = currentSets.slice(lastCount).map(s => s.id)
-        dbOps.push(supabase.from('sets').delete().in('id', toDelete))
+        dbOps.push(supabase.from('sets').delete().in('id', currentSets.slice(lastCount).map(s => s.id)))
       }
     }
 
     await Promise.all(dbOps)
 
-    // 4. Riordina gli esercizi secondo l'ordine della sessione
-    // Prima ricarica per avere tutti gli id aggiornati
     const { data: freshExercises } = await supabase
-      .from('exercises')
-      .select('id, name')
-      .eq('workout_id', workout.id)
+      .from('exercises').select('id, name').eq('workout_id', workout.id)
 
     if (freshExercises) {
-      // Esercizi nell'ordine della sessione + eventuali rimasti fuori dall'ordine
       const ordered = []
       sessionOrder.forEach(name => {
         const found = freshExercises.find(e => e.name === name)
         if (found) ordered.push(found)
       })
-      // Aggiungi eventuali esercizi della scheda non presenti nella sessione (non dovrebbero esserci dopo il sync)
-      freshExercises.forEach(e => {
-        if (!ordered.find(o => o.id === e.id)) ordered.push(e)
-      })
-
-      await Promise.all(ordered.map((ex, i) =>
-        supabase.from('exercises').update({ position: i }).eq('id', ex.id)
-      ))
+      freshExercises.forEach(e => { if (!ordered.find(o => o.id === e.id)) ordered.push(e) })
+      await Promise.all(ordered.map((ex, i) => supabase.from('exercises').update({ position: i }).eq('id', ex.id)))
     }
 
     await fetchExercises()
@@ -278,9 +260,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     const [moved] = updated.splice(fromIdx, 1)
     updated.splice(toIdx, 0, moved)
     setExercises(updated)
-    await Promise.all(updated.map((ex, i) =>
-      supabase.from('exercises').update({ position: i }).eq('id', ex.id)
-    ))
+    await Promise.all(updated.map((ex, i) => supabase.from('exercises').update({ position: i }).eq('id', ex.id)))
   }
 
   function openEditExModal(ex) {
@@ -293,7 +273,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   async function saveEditEx() {
     if (!editingEx) return
     setSavingEditEx(true)
-
     const currentSets = editingEx.sets?.sort((a, b) => a.position - b.position) || []
     const newCount = editSetValues.length
     const oldCount = currentSets.length
@@ -301,20 +280,13 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     await Promise.all(editSetValues.slice(0, oldCount).map((sv, i) =>
       supabase.from('sets').update({ reps: parseInt(sv.reps) || 0, kg: parseFloat(sv.kg) || 0 }).eq('id', currentSets[i].id)
     ))
-
     if (newCount > oldCount) {
-      const toInsert = editSetValues.slice(oldCount).map((sv, i) => ({
-        exercise_id: editingEx.id,
-        reps: parseInt(sv.reps) || 0,
-        kg: parseFloat(sv.kg) || 0,
-        position: oldCount + i
-      }))
-      await supabase.from('sets').insert(toInsert)
+      await supabase.from('sets').insert(editSetValues.slice(oldCount).map((sv, i) => ({
+        exercise_id: editingEx.id, reps: parseInt(sv.reps) || 0, kg: parseFloat(sv.kg) || 0, position: oldCount + i
+      })))
     }
-
     if (newCount < oldCount) {
-      const toDelete = currentSets.slice(newCount).map(s => s.id)
-      await supabase.from('sets').delete().in('id', toDelete)
+      await supabase.from('sets').delete().in('id', currentSets.slice(newCount).map(s => s.id))
     }
 
     await fetchExercises()
@@ -351,20 +323,10 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
     setSaving(true)
     const { data: ex, error } = await supabase
       .from('exercises')
-      .insert({
-        workout_id: workout.id,
-        name: selectedEx,
-        machine: exMachine,
-        position: exercises.length,
-        note: exNote.trim() || null
-      })
+      .insert({ workout_id: workout.id, name: selectedEx, machine: exMachine, position: exercises.length, note: exNote.trim() || null })
       .select().single()
-
     if (!error && ex) {
-      const setsToInsert = kgPerSet.map((kg, i) => ({
-        exercise_id: ex.id, reps: parseInt(reps), kg: parseFloat(kg), position: i
-      }))
-      await supabase.from('sets').insert(setsToInsert)
+      await supabase.from('sets').insert(kgPerSet.map((kg, i) => ({ exercise_id: ex.id, reps: parseInt(reps), kg: parseFloat(kg), position: i })))
       resetModal()
       fetchExercises()
     }
@@ -381,11 +343,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   async function saveCustomExercise() {
     if (!newExName.trim()) return
     setSavingCustom(true)
-    const { error } = await supabase.from('custom_exercises').insert({
-      user_id: session.user.id,
-      name: newExName.trim(),
-      machine: newExMachine.trim() || null
-    })
+    const { error } = await supabase.from('custom_exercises').insert({ user_id: session.user.id, name: newExName.trim(), machine: newExMachine.trim() || null })
     if (!error) { setNewExName(''); setNewExMachine(''); fetchCustomExercises() }
     setSavingCustom(false)
   }
@@ -393,16 +351,8 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   async function saveCustomExerciseEdit() {
     if (!editingCustomName.trim() || !editingCustomEx) return
     setSavingCustomEdit(true)
-    const { error } = await supabase
-      .from('custom_exercises')
-      .update({ name: editingCustomName.trim(), machine: editingCustomMachine.trim() || null })
-      .eq('id', editingCustomEx)
-    if (!error) {
-      setEditingCustomEx(null)
-      setEditingCustomName('')
-      setEditingCustomMachine('')
-      fetchCustomExercises()
-    }
+    const { error } = await supabase.from('custom_exercises').update({ name: editingCustomName.trim(), machine: editingCustomMachine.trim() || null }).eq('id', editingCustomEx)
+    if (!error) { setEditingCustomEx(null); setEditingCustomName(''); setEditingCustomMachine(''); fetchCustomExercises() }
     setSavingCustomEdit(false)
   }
 
@@ -432,6 +382,13 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
   return (
     <div className="pt-6">
 
+      {/* TOAST CONDIVISIONE */}
+      {shared && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#e8ff47] text-black text-xs font-bold px-4 py-2 rounded-xl shadow-lg">
+          Testo copiato — incollalo su WhatsApp!
+        </div>
+      )}
+
       {/* MODAL CONFERMA COPIA SESSIONE */}
       {showCopyConfirm && copyPreview && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
@@ -441,12 +398,9 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
             <div className="text-[#666] text-sm mb-4">
               Per allineare la scheda all'ultima sessione verranno apportate queste modifiche:
             </div>
-
             {copyPreview.toAdd.length > 0 && (
               <div className="mb-3">
-                <div className="text-green-400 text-xs uppercase tracking-widest font-bold mb-2">
-                  ＋ Esercizi da aggiungere ({copyPreview.toAdd.length})
-                </div>
+                <div className="text-green-400 text-xs uppercase tracking-widest font-bold mb-2">＋ Esercizi da aggiungere ({copyPreview.toAdd.length})</div>
                 <div className="space-y-1">
                   {copyPreview.toAdd.map(name => (
                     <div key={name} className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-1.5">
@@ -457,12 +411,9 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                 </div>
               </div>
             )}
-
             {copyPreview.toRemove.length > 0 && (
               <div className="mb-4">
-                <div className="text-red-400 text-xs uppercase tracking-widest font-bold mb-2">
-                  − Esercizi da rimuovere ({copyPreview.toRemove.length})
-                </div>
+                <div className="text-red-400 text-xs uppercase tracking-widest font-bold mb-2">− Esercizi da rimuovere ({copyPreview.toRemove.length})</div>
                 <div className="space-y-1">
                   {copyPreview.toRemove.map(name => (
                     <div key={name} className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-1.5">
@@ -473,35 +424,37 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                 </div>
               </div>
             )}
-
-            <div className="text-[#444] text-xs mb-5">
-              Serie, ripetizioni e pesi verranno copiati per tutti gli esercizi. L'ordine sarà quello dell'ultima sessione.
-            </div>
-
+            <div className="text-[#444] text-xs mb-5">Serie, ripetizioni e pesi verranno copiati per tutti gli esercizi. L'ordine sarà quello dell'ultima sessione.</div>
             <div className="space-y-3">
               <button
-                onClick={() => applyLastSessionCopy(
-                  copyPreview.lastMap,
-                  copyPreview.sessionOrder,
-                  copyPreview.toAdd,
-                  copyPreview.toRemove
-                )}
+                onClick={() => applyLastSessionCopy(copyPreview.lastMap, copyPreview.sessionOrder, copyPreview.toAdd, copyPreview.toRemove)}
                 className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm"
-              >
-                ✓ Conferma e applica
-              </button>
-              <button
-                onClick={() => { setShowCopyConfirm(false); setCopyPreview(null) }}
-                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]"
-              >
-                Annulla
-              </button>
+              >✓ Conferma e applica</button>
+              <button onClick={() => { setShowCopyConfirm(false); setCopyPreview(null) }}
+                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">Annulla</button>
             </div>
           </div>
         </div>
       )}
 
-      <button onClick={onBack} className="text-[#666] text-sm flex items-center gap-1 mb-4">← Schede</button>
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={onBack} className="text-[#666] text-sm flex items-center gap-1">← Schede</button>
+        {exercises.length > 0 && (
+          <button
+            onClick={shareWorkout}
+            className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
+            title="Condividi scheda"
+          >
+            {shared
+              ? <span className="text-green-400 text-xs font-bold">✓</span>
+              : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#888]">
+                  <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                </svg>
+            }
+          </button>
+        )}
+      </div>
 
       <div className="flex items-start justify-between">
         <div>
@@ -529,10 +482,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
             ) : lastSessionApplied ? (
               <span className="text-green-400">✓ Scheda aggiornata dall'ultima sessione!</span>
             ) : (
-              <>
-                <span className="text-[#666]">📋</span>
-                <span className="text-[#888]">Copia dall'ultima sessione</span>
-              </>
+              <><span className="text-[#666]">📋</span><span className="text-[#888]">Copia dall'ultima sessione</span></>
             )}
           </button>
         )}
@@ -565,7 +515,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                     </div>
                   ))}
                 </div>
-
                 {editingNote === ex.id ? (
                   <div className="flex items-center gap-2 mt-3">
                     <input
@@ -579,38 +528,23 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                     <button onClick={() => { setEditingNote(null); setEditingNoteValue('') }} className="w-7 h-7 rounded-lg border border-[#2a2a2a] text-[#666] text-xs flex items-center justify-center">✕</button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => { setEditingNote(ex.id); setEditingNoteValue(ex.note || '') }}
-                    className="flex items-center gap-1.5 mt-2"
-                  >
+                  <button onClick={() => { setEditingNote(ex.id); setEditingNoteValue(ex.note || '') }} className="flex items-center gap-1.5 mt-2">
                     <span className="text-[#444] text-xs">📝</span>
-                    <span className={`text-xs ${ex.note ? 'text-[#888] italic' : 'text-[#444]'}`}>
-                      {ex.note || 'Aggiungi nota...'}
-                    </span>
+                    <span className={`text-xs ${ex.note ? 'text-[#888] italic' : 'text-[#444]'}`}>{ex.note || 'Aggiungi nota...'}</span>
                   </button>
                 )}
               </div>
               <div className="flex items-center gap-1 ml-2">
                 <div className="flex flex-col gap-1">
-                  <button
-                    onClick={() => moveExercise(idx, idx - 1)}
-                    disabled={idx === 0}
-                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20"
-                  >↑</button>
-                  <button
-                    onClick={() => moveExercise(idx, idx + 1)}
-                    disabled={idx === exercises.length - 1}
-                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20"
-                  >↓</button>
+                  <button onClick={() => moveExercise(idx, idx - 1)} disabled={idx === 0}
+                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20">↑</button>
+                  <button onClick={() => moveExercise(idx, idx + 1)} disabled={idx === exercises.length - 1}
+                    className="w-7 h-7 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-white text-xs flex items-center justify-center disabled:opacity-20">↓</button>
                 </div>
-                <button
-                  onClick={() => openEditExModal(ex)}
-                  className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-[#666] text-sm flex items-center justify-center"
-                >✎</button>
-                <button
-                  onClick={() => deleteExercise(ex.id)}
-                  className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center"
-                >✕</button>
+                <button onClick={() => openEditExModal(ex)}
+                  className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-[#666] text-sm flex items-center justify-center">✎</button>
+                <button onClick={() => deleteExercise(ex.id)}
+                  className="w-8 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-sm flex items-center justify-center">✕</button>
               </div>
             </div>
           </div>
@@ -625,7 +559,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
         </div>
       )}
 
-      {/* MODAL MODIFICA SERIE ESERCIZIO */}
+      {/* MODAL MODIFICA SERIE */}
       {showEditExModal && editingEx && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => { setShowEditExModal(false); setEditingEx(null) }}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -646,18 +580,14 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                   <tr key={i} className="border-t border-[#1a1a1a]">
                     <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
                     <td className="py-2 text-center">
-                      <input
-                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                      <input className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
                         type="number" step="2.5" min="0" value={sv.kg}
-                        onChange={e => { const u = [...editSetValues]; u[i] = { ...u[i], kg: e.target.value }; setEditSetValues(u) }}
-                      />
+                        onChange={e => { const u = [...editSetValues]; u[i] = { ...u[i], kg: e.target.value }; setEditSetValues(u) }} />
                     </td>
                     <td className="py-2 text-center">
-                      <input
-                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                      <input className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
                         type="number" min="1" value={sv.reps}
-                        onChange={e => { const u = [...editSetValues]; u[i] = { ...u[i], reps: e.target.value }; setEditSetValues(u) }}
-                      />
+                        onChange={e => { const u = [...editSetValues]; u[i] = { ...u[i], reps: e.target.value }; setEditSetValues(u) }} />
                     </td>
                     <td className="py-2 text-center">
                       <button onClick={() => removeSetFromEdit(i)} disabled={editSetValues.length <= 1}
@@ -686,15 +616,11 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
             <div className="flex items-center justify-between mb-4">
               <div className="text-white font-black text-2xl tracking-wide">AGGIUNGI ESERCIZIO</div>
               <button onClick={() => { resetModal(); setShowCustomModal(true) }}
-                className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-3 py-1.5">
-                ＋ Nuovo
-              </button>
+                className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-3 py-1.5">＋ Nuovo</button>
             </div>
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Esercizio</label>
-            <select
-              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
-              value={selectedEx} onChange={e => onSelectExercise(e.target.value)}
-            >
+            <select className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-3"
+              value={selectedEx} onChange={e => onSelectExercise(e.target.value)}>
               <option value="">— Seleziona dalla libreria —</option>
               {getAllExercises().map(ex => (
                 <option key={ex.name} value={ex.name}>{ex.name}{ex.isCustom ? ' ★' : ''}</option>
@@ -728,21 +654,17 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                 <div key={i} className="flex items-center gap-3">
                   <span className="text-[#444] font-mono text-xs w-4">{i + 1}</span>
                   <span className="text-[#666] text-sm flex-1">{reps} rip</span>
-                  <input
-                    className="bg-[#111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-[#e8ff47] font-mono font-bold text-sm text-center w-20 outline-none focus:border-[#e8ff47]"
+                  <input className="bg-[#111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-[#e8ff47] font-mono font-bold text-sm text-center w-20 outline-none focus:border-[#e8ff47]"
                     type="number" min="0" step="2.5" value={kg}
-                    onChange={e => { const updated = [...kgPerSet]; updated[i] = parseFloat(e.target.value) || 0; setKgPerSet(updated) }}
-                  />
+                    onChange={e => { const updated = [...kgPerSet]; updated[i] = parseFloat(e.target.value) || 0; setKgPerSet(updated) }} />
                   <span className="text-[#666] text-sm">kg</span>
                 </div>
               ))}
             </div>
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nota (opzionale)</label>
-            <input
-              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+            <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
               placeholder="es. Presa prona, gomiti stretti..."
-              value={exNote} onChange={e => setExNote(e.target.value)}
-            />
+              value={exNote} onChange={e => setExNote(e.target.value)} />
             <button onClick={addExercise} disabled={saving || !selectedEx}
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               {saving ? 'Salvataggio...' : '＋ Aggiungi alla scheda'}
@@ -767,7 +689,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50 mb-5">
               {savingCustom ? 'Salvataggio...' : 'Salva esercizio'}
             </button>
-
             {customExercises.length > 0 && (
               <div>
                 <div className="text-[#666] text-xs uppercase tracking-widest mb-3">I tuoi esercizi</div>
@@ -776,11 +697,9 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                     <div key={ex.id} className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden">
                       {editingCustomEx === ex.id ? (
                         <div className="p-3 space-y-2">
-                          <input
-                            className="w-full bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg px-3 py-2 text-white text-sm outline-none"
+                          <input className="w-full bg-[#0a0a0a] border border-[#e8ff47]/30 rounded-lg px-3 py-2 text-white text-sm outline-none"
                             value={editingCustomName} onChange={e => setEditingCustomName(e.target.value)} autoFocus />
-                          <input
-                            className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-[#666] text-sm outline-none"
+                          <input className="w-full bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 text-[#666] text-sm outline-none"
                             placeholder="Macchinario (opzionale)"
                             value={editingCustomMachine} onChange={e => setEditingCustomMachine(e.target.value)} />
                           <div className="flex gap-2">
@@ -789,9 +708,7 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                               {savingCustomEdit ? 'Salvo...' : '✓ Salva'}
                             </button>
                             <button onClick={() => { setEditingCustomEx(null); setEditingCustomName(''); setEditingCustomMachine('') }}
-                              className="flex-1 py-2 rounded-lg border border-[#2a2a2a] text-[#666] text-xs">
-                              Annulla
-                            </button>
+                              className="flex-1 py-2 rounded-lg border border-[#2a2a2a] text-[#666] text-xs">Annulla</button>
                           </div>
                         </div>
                       ) : (
@@ -813,7 +730,6 @@ export default function WorkoutDetail({ workout, session, onBack, scheduledId })
                 </div>
               </div>
             )}
-
             <button onClick={() => { setShowCustomModal(false); setShowModal(true); setEditingCustomEx(null) }}
               className="w-full mt-5 py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
               ← Torna alla libreria
