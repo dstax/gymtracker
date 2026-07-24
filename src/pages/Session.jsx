@@ -17,7 +17,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [saving, setSaving] = useState(false)
   const [showExerciseList, setShowExerciseList] = useState(false)
   const [showResumeModal, setShowResumeModal] = useState(false)
-  const [showSetConfirm, setShowSetConfirm] = useState(null) // 'add' | 'remove'
+  const [showSetConfirm, setShowSetConfirm] = useState(null)
   const [savedData, setSavedData] = useState(null)
   const totalRef = useRef(null)
   const restRef = useRef(null)
@@ -244,24 +244,26 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     }
   }
 
+  // FIX: join diretta session_sets->sessions invece di due query separate
+  // Evita il problema dell'array sessionIds troppo grande e dei permessi RLS
   async function fetchHistoricalMaxKg() {
-    const { data: userSessions } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('user_id', userSession.user.id)
-    if (!userSessions || userSessions.length === 0) return {}
-    const sessionIds = userSessions.map(s => s.id)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('session_sets')
-      .select('exercise_name, kg')
-      .in('session_id', sessionIds)
+      .select('exercise_name, kg, sessions!inner(user_id, ended_at)')
+      .eq('sessions.user_id', userSession.user.id)
+      .not('sessions.ended_at', 'is', null)
+
+    if (error || !data) return {}
+
     const maxKg = {}
-    if (data) {
-      data.forEach(s => {
-        const kg = parseFloat(s.kg) || 0
-        if (!maxKg[s.exercise_name] || kg > maxKg[s.exercise_name]) maxKg[s.exercise_name] = kg
-      })
-    }
+    data.forEach(s => {
+      const kg = parseFloat(s.kg) || 0
+      if (kg > 0) {
+        if (!maxKg[s.exercise_name] || kg > maxKg[s.exercise_name]) {
+          maxKg[s.exercise_name] = kg
+        }
+      }
+    })
     return maxKg
   }
 
@@ -491,7 +493,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
             </tr>
           </thead>
           <tbody>
-            {/* SERIE BASE */}
             {currentSets.map((s, i) => (
               <tr key={s.id} className={`border-t border-[#1a1a1a] transition-opacity ${completedSets[s.id] ? 'opacity-40' : ''}`}>
                 <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
@@ -522,7 +523,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
               </tr>
             ))}
 
-            {/* SERIE EXTRA */}
             {currentExtras.map((s, i) => (
               <tr key={s.id} className={`border-t border-[#e8ff47]/10 transition-opacity ${s.completed ? 'opacity-40' : ''}`}>
                 <td className="py-2 text-center">
@@ -563,7 +563,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
           </tbody>
         </table>
 
-        {/* PULSANTI AGGIUNGI / RIMUOVI SERIE */}
         <div className="flex gap-2 mt-3">
           <button
             onClick={() => setShowSetConfirm('add')}
