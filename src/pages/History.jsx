@@ -117,29 +117,60 @@ export default function History({ session }) {
     if (data) setCustomExercises(data)
   }
 
+  // FIX: prima prendi le sessioni dell'utente, poi i session_sets.
+  // Il filtro .eq() su tabella joinata non funziona in modo affidabile con RLS.
   async function fetchPRs() {
     setLoadingPRs(true)
-    const { data } = await supabase
+
+    // Step 1: prendi tutti gli id sessione dell'utente
+    const { data: userSessions, error: sessErr } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .not('ended_at', 'is', null)
+
+    if (sessErr || !userSessions || userSessions.length === 0) {
+      setPRData([])
+      setLoadingPRs(false)
+      return
+    }
+
+    const sessionIds = userSessions.map(s => s.id)
+
+    // Step 2: prendi tutti i session_sets di quelle sessioni
+    // Supabase gestisce bene .in() su colonne dirette (non join)
+    const { data, error } = await supabase
       .from('session_sets')
-      .select('exercise_name, kg, reps, sessions!inner(user_id)')
-      .eq('sessions.user_id', session.user.id)
-    if (!data) { setLoadingPRs(false); return }
+      .select('exercise_name, kg, reps')
+      .in('session_id', sessionIds)
+
+    if (error || !data) {
+      setPRData([])
+      setLoadingPRs(false)
+      return
+    }
+
+    // Calcola max kg e volume totale per esercizio
     const exercises = {}
     data.forEach(s => {
       const name = s.exercise_name
+      const kg = parseFloat(s.kg) || 0
+      const reps = parseInt(s.reps) || 0
       if (!exercises[name]) exercises[name] = { maxKg: 0, totalVolume: 0 }
-      if ((s.kg || 0) > exercises[name].maxKg) exercises[name].maxKg = s.kg || 0
-      exercises[name].totalVolume += (s.kg || 0) * (s.reps || 0)
+      if (kg > exercises[name].maxKg) exercises[name].maxKg = kg
+      exercises[name].totalVolume += kg * reps
     })
-    setPRData(Object.entries(exercises)
-      .map(([name, stats]) => ({ name, maxKg: stats.maxKg, totalVolume: stats.totalVolume }))
-      .sort((a, b) => a.name.localeCompare(b.name)))
+
+    setPRData(
+      Object.entries(exercises)
+        .map(([name, stats]) => ({ name, maxKg: stats.maxKg, totalVolume: stats.totalVolume }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    )
     setLoadingPRs(false)
   }
 
   async function sharePRs() {
     if (prData.length === 0) return
-
     const today = new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })
     let text = `🏆 *RECORD PERSONALI*\n`
     text += `📅 ${today}\n\n`
@@ -155,27 +186,18 @@ export default function History({ session }) {
       text += `\n`
     })
     text += `_Inviato da GymTracker 💪_`
-
     if (navigator.share) {
-      try {
-        await navigator.share({ text })
-        return
-      } catch { /* fallback */ }
+      try { await navigator.share({ text }); return } catch { /* fallback */ }
     }
-
     try {
       await navigator.clipboard.writeText(text)
       setPrCopied(true)
       setTimeout(() => setPrCopied(false), 2500)
     } catch {
       const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta); ta.select()
+      document.execCommand('copy'); document.body.removeChild(ta)
       setPrCopied(true)
       setTimeout(() => setPrCopied(false), 2500)
     }
@@ -423,7 +445,7 @@ export default function History({ session }) {
     text += `⏱ Durata: ${fmt(selected.duration_seconds)} | Volume: ${(selected.total_volume / 1000).toFixed(1)}t`
     if (hasPR) text += ` | 🏆 PR`
     text += `\n\n`
-    grouped.forEach(({ name, sets }) => {
+    groupByExerciseOrdered(detail).forEach(({ name, sets }) => {
       text += `*${name}*\n`
       sets.forEach((s, i) => {
         text += `  Serie ${i + 1}: ${s.reps} rip × ${s.kg} kg`
@@ -481,7 +503,6 @@ export default function History({ session }) {
   if (showPRs) return (
     <div className="pt-6">
 
-      {/* TOAST COPIATO */}
       {prCopied && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-[#e8ff47] text-black text-xs font-bold px-4 py-2 rounded-xl shadow-lg">
           Testo copiato — incollalo su WhatsApp!
@@ -539,7 +560,6 @@ export default function History({ session }) {
   if (selected) return (
     <div className="pt-6">
 
-      {/* MODAL CONFERMA ELIMINA ESERCIZIO */}
       {confirmDeleteEx && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
           <div className="bg-[#111] border border-[#2a2a2a] rounded-3xl w-full max-w-[340px] p-6">
@@ -562,13 +582,11 @@ export default function History({ session }) {
         </div>
       )}
 
-      {/* MODAL AGGIUNGI ESERCIZIO */}
       {showAddExModal && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowAddExModal(false)}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
             <div className="text-white font-black text-xl tracking-wide mb-4">AGGIUNGI ESERCIZIO</div>
-
             <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Esercizio</label>
             <select
               className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
@@ -579,7 +597,6 @@ export default function History({ session }) {
                 <option key={name} value={name}>{name}</option>
               ))}
             </select>
-
             <div className="text-[#666] text-xs uppercase tracking-widest mb-2">Serie</div>
             <table className="w-full mb-3">
               <thead>
@@ -613,12 +630,10 @@ export default function History({ session }) {
                 ))}
               </tbody>
             </table>
-
             <button onClick={() => setAddExSets(prev => { const last = prev[prev.length - 1]; return [...prev, { kg: last?.kg ?? 0, reps: last?.reps ?? 10 }] })}
               className="w-full py-2 rounded-xl text-xs text-[#e8ff47] border border-[#e8ff47]/20 bg-[#e8ff47]/5 mb-5">
               ＋ Aggiungi serie
             </button>
-
             <button onClick={confirmAddExercise} disabled={!addExSelected}
               className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               ＋ Aggiungi alla sessione
@@ -643,15 +658,12 @@ export default function History({ session }) {
       {editMode ? (
         <div>
           <div className="text-[#e8ff47] text-xs uppercase tracking-widest mb-4">Modifica sessione</div>
-
           <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Nome sessione</label>
           <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
             value={editName} onChange={e => setEditName(e.target.value)} />
-
           <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Durata (minuti)</label>
           <input className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-5"
             type="number" min="1" value={editMinutes} onChange={e => setEditMinutes(e.target.value)} />
-
           <div className="flex items-center justify-between mb-3">
             <div className="text-[#666] text-xs uppercase tracking-widest">Esercizi e serie</div>
             <button onClick={() => { setShowAddExModal(true); setAddExSelected(''); setAddExSets([{ kg: 0, reps: 10 }]) }}
@@ -659,7 +671,6 @@ export default function History({ session }) {
               ＋ Esercizio
             </button>
           </div>
-
           <div className="space-y-4">
             {editExerciseOrder.map((name, orderIdx) => {
               const group = groupByExerciseOrdered(detail).find(g => g.name === name)
@@ -668,7 +679,6 @@ export default function History({ session }) {
               const isDeleted = editDeletedExercises.includes(name)
               const totalExisting = editExerciseOrder.length
               const totalNew = editNewExercises.length
-
               return (
                 <div key={name} className={`rounded-2xl p-4 border transition-all ${isDeleted ? 'bg-red-500/5 border-red-500/20 opacity-50' : 'bg-[#111] border-[#2a2a2a]'}`}>
                   <div className="flex items-center justify-between mb-3">
@@ -691,7 +701,6 @@ export default function History({ session }) {
                       )}
                     </div>
                   </div>
-
                   {!isDeleted && (
                     <>
                       <div className="flex items-center gap-2 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg px-3 py-2 mb-3">
@@ -701,7 +710,6 @@ export default function History({ session }) {
                           value={editNotes[name] ?? ''}
                           onChange={e => setEditNotes(prev => ({ ...prev, [name]: e.target.value }))} />
                       </div>
-
                       <table className="w-full mb-2">
                         <thead>
                           <tr>
@@ -734,7 +742,6 @@ export default function History({ session }) {
                               </td>
                             </tr>
                           ))}
-
                           {(editNewSets[name] || []).map((ns, i) => {
                             const existingCount = sets.filter(s => editSets[s.id]).length
                             return (
@@ -759,7 +766,6 @@ export default function History({ session }) {
                           })}
                         </tbody>
                       </table>
-
                       <button onClick={() => addNewSet(name, sets)}
                         className="w-full py-1.5 rounded-lg text-xs text-[#e8ff47] border border-[#e8ff47]/20 bg-[#e8ff47]/5">
                         ＋ Aggiungi serie
@@ -769,7 +775,6 @@ export default function History({ session }) {
                 </div>
               )
             })}
-
             {editNewExercises.map((ex, exIdx) => (
               <div key={`newex-${exIdx}`} className="bg-[#111] border border-[#e8ff47]/20 rounded-2xl p-4">
                 <div className="flex items-center justify-between mb-3">
@@ -807,7 +812,6 @@ export default function History({ session }) {
               </div>
             ))}
           </div>
-
           <div className="mt-5 space-y-3">
             <button onClick={saveEdit} disabled={saving} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               {saving ? 'Salvataggio...' : '✓ Salva modifiche'}
