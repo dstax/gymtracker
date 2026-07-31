@@ -140,9 +140,10 @@ export default function History({ session }) {
     // Step 2: prendi tutti i session_sets di quelle sessioni
     // Supabase gestisce bene .in() su colonne dirette (non join)
     const { data, error } = await supabase
-      .from('session_sets')
-      .select('exercise_name, kg, reps')
-      .in('session_id', sessionIds)
+  .from('session_sets')
+  .select('exercise_name, kg, reps')
+  .in('session_id', sessionIds)
+  .limit(10000)
 
     if (error || !data) {
       setPRData([])
