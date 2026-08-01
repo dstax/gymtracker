@@ -244,25 +244,20 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     }
   }
 
-  // FIX: join diretta session_sets->sessions invece di due query separate
-  // Evita il problema dell'array sessionIds troppo grande e dei permessi RLS
+  // FIX: usa la stessa RPC get_user_pr per coerenza e affidabilità
+  // Nessun limite di righe, nessun problema RLS, calcolo nel DB
   async function fetchHistoricalMaxKg() {
     const { data, error } = await supabase
-      .from('session_sets')
-      .select('exercise_name, kg, sessions!inner(user_id, ended_at)')
-      .eq('sessions.user_id', userSession.user.id)
-      .not('sessions.ended_at', 'is', null)
+      .rpc('get_user_pr', { p_user_id: userSession.user.id })
 
-    if (error || !data) return {}
+    if (error || !data) {
+      console.error('Errore fetchHistoricalMaxKg:', error)
+      return {}
+    }
 
     const maxKg = {}
-    data.forEach(s => {
-      const kg = parseFloat(s.kg) || 0
-      if (kg > 0) {
-        if (!maxKg[s.exercise_name] || kg > maxKg[s.exercise_name]) {
-          maxKg[s.exercise_name] = kg
-        }
-      }
+    data.forEach(row => {
+      maxKg[row.exercise_name] = parseFloat(row.max_kg) || 0
     })
     return maxKg
   }
