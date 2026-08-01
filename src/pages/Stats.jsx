@@ -1,160 +1,139 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer
+} from 'recharts'
 
 export default function Stats({ session }) {
   const [exercises, setExercises] = useState([])
-  const [selectedExercise, setSelectedExercise] = useState('')
-  const [progressData, setProgressData] = useState([])
-  const [volumeData, setVolumeData] = useState([])
+  const [selectedEx, setSelectedEx] = useState('')
+  const [chartData, setChartData] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadingChart, setLoadingChart] = useState(false)
+  const [allStats, setAllStats] = useState([])
 
   useEffect(() => {
-    fetchExercises()
+    fetchStats()
   }, [])
 
-  useEffect(() => {
-    if (selectedExercise) fetchProgress(selectedExercise)
-  }, [selectedExercise])
+  async function fetchStats() {
+    setLoading(true)
+    const { data, error } = await supabase
+      .rpc('get_user_exercise_stats', { p_user_id: session.user.id })
 
-  async function fetchExercises() {
-    const { data } = await supabase
-      .from('session_sets')
-      .select('exercise_name')
-      .eq('session_id', await getSessionIds())
-    
-    // Recupera tutti i session_sets dell'utente tramite join
-    const { data: sets } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('user_id', session.user.id)
-
-    if (sets && sets.length > 0) {
-      const ids = sets.map(s => s.id)
-      const { data: exData } = await supabase
-        .from('session_sets')
-        .select('exercise_name')
-        .in('session_id', ids)
-
-      if (exData) {
-        const unique = [...new Set(exData.map(e => e.exercise_name))].sort()
-        setExercises(unique)
-        if (unique.length > 0) setSelectedExercise(unique[0])
-      }
+    if (error || !data) {
+      console.error('Errore fetchStats:', error)
+      setLoading(false)
+      return
     }
+
+    setAllStats(data)
+
+    // Estrai lista esercizi unici
+    const uniqueExercises = [...new Set(data.map(r => r.exercise_name))].sort()
+    setExercises(uniqueExercises)
+
+    if (uniqueExercises.length > 0) {
+      const first = uniqueExercises[0]
+      setSelectedEx(first)
+      buildChartData(data, first)
+    }
+
     setLoading(false)
   }
 
-  async function getSessionIds() {
-    const { data } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('user_id', session.user.id)
-    return data ? data.map(s => s.id) : []
+  function buildChartData(data, exerciseName) {
+    const filtered = data
+      .filter(r => r.exercise_name === exerciseName)
+      .map(r => ({
+        date: new Date(r.session_date).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }),
+        maxKg: parseFloat(r.max_kg) || 0,
+        volume: parseFloat(r.total_volume) || 0,
+      }))
+    setChartData(filtered)
   }
 
-  async function fetchProgress(exerciseName) {
-    setLoadingChart(true)
-
-    const ids = await getSessionIds()
-    if (ids.length === 0) { setLoadingChart(false); return }
-
-    const { data: sets } = await supabase
-      .from('session_sets')
-      .select('*, sessions(ended_at)')
-      .in('session_id', ids)
-      .eq('exercise_name', exerciseName)
-      .order('executed_at', { ascending: true })
-
-    if (sets && sets.length > 0) {
-      // Raggruppa per sessione e calcola max kg e volume
-      const bySession = {}
-      sets.forEach(s => {
-        const date = s.sessions?.ended_at
-          ? new Date(s.sessions.ended_at).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })
-          : s.session_id.slice(0, 6)
-        if (!bySession[date]) bySession[date] = { date, maxKg: 0, volume: 0, sets: 0 }
-        if (s.kg > bySession[date].maxKg) bySession[date].maxKg = s.kg
-        bySession[date].volume += (s.kg * s.reps)
-        bySession[date].sets += 1
-      })
-
-      const chartData = Object.values(bySession)
-      setProgressData(chartData)
-      setVolumeData(chartData)
-    } else {
-      setProgressData([])
-      setVolumeData([])
-    }
-    setLoadingChart(false)
+  function handleSelectExercise(name) {
+    setSelectedEx(name)
+    buildChartData(allStats, name)
   }
 
   const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-3 py-2">
-          <p className="text-[#666] text-xs">{label}</p>
-          <p className="text-[#e8ff47] font-bold text-sm">{payload[0].value} {payload[0].name === 'maxKg' ? 'kg' : 'kg·rip'}</p>
-        </div>
-      )
-    }
-    return null
+    if (!active || !payload || !payload.length) return null
+    return (
+      <div className="bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-2 text-xs">
+        <div className="text-[#666] mb-1">{label}</div>
+        {payload.map((p, i) => (
+          <div key={i} style={{ color: p.color }} className="font-mono font-bold">
+            {p.name}: {p.value}{p.name === 'Max kg' ? ' kg' : ' kg'}
+          </div>
+        ))}
+      </div>
+    )
   }
 
-  if (loading) return <div className="pt-8 text-[#666] text-sm">Caricamento...</div>
+  if (loading) return <div className="text-[#666] text-sm">Caricamento statistiche...</div>
 
   if (exercises.length === 0) return (
-    <div className="pt-8">
-      <div className="text-[#e8ff47] text-3xl font-black tracking-wide">STATISTICHE</div>
-      <div className="mt-6 p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
-        <p className="text-[#666] text-sm">Nessun dato disponibile.</p>
-        <p className="text-[#444] text-xs mt-1">Completa qualche sessione per vedere le statistiche!</p>
-      </div>
+    <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+      <p className="text-[#666] text-sm">Nessun dato ancora. Completa qualche sessione!</p>
     </div>
   )
 
   return (
-    <div className="pt-8">
-      <div className="text-[#e8ff47] text-3xl font-black tracking-wide">STATISTICHE</div>
-      <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Progressione esercizi</div>
+    <div className="space-y-6 pb-6">
+      <div>
+        <div className="text-[#e8ff47] text-3xl font-black tracking-wide mb-1">GRAFICI</div>
+        <div className="text-[#666] text-xs uppercase tracking-widest">Progressione per esercizio</div>
+      </div>
 
-      {/* SELETTORE ESERCIZIO */}
-      <div className="mt-4">
+      <div>
         <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Esercizio</label>
         <select
-          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47]"
-          value={selectedExercise}
-          onChange={e => setSelectedExercise(e.target.value)}
+          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors"
+          value={selectedEx}
+          onChange={e => handleSelectExercise(e.target.value)}
         >
-          {exercises.map(ex => (
-            <option key={ex} value={ex}>{ex}</option>
+          {exercises.map(name => (
+            <option key={name} value={name}>{name}</option>
           ))}
         </select>
       </div>
 
-      {loadingChart ? (
-        <div className="mt-6 text-[#666] text-sm">Caricamento dati...</div>
-      ) : progressData.length > 0 ? (
-        <div className="mt-6 space-y-6">
-
-          {/* GRAFICO PESO MASSIMO */}
+      {chartData.length === 0 ? (
+        <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
+          <p className="text-[#666] text-sm">Nessun dato per questo esercizio.</p>
+        </div>
+      ) : (
+        <>
+          {/* GRAFICO MAX KG */}
           <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-            <div className="text-white font-bold mb-1">Peso massimo</div>
-            <div className="text-[#666] text-xs mb-4">Kg più alto sollevato per sessione</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={progressData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
-                <XAxis dataKey="date" tick={{ fill: '#666', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#666', fontSize: 10 }} />
+            <div className="text-white font-bold text-sm mb-1">Max kg per sessione</div>
+            <div className="text-[#666] text-xs mb-4">Il peso massimo sollevato in ogni sessione</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: '#666', fontSize: 10 }}
+                  axisLine={{ stroke: '#2a2a2a' }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: '#666', fontSize: 10 }}
+                  axisLine={{ stroke: '#2a2a2a' }}
+                  tickLine={false}
+                />
                 <Tooltip content={<CustomTooltip />} />
                 <Line
                   type="monotone"
                   dataKey="maxKg"
+                  name="Max kg"
                   stroke="#e8ff47"
                   strokeWidth={2}
-                  dot={{ fill: '#e8ff47', r: 4 }}
-                  activeDot={{ r: 6 }}
+                  dot={{ fill: '#4ade80', r: 3 }}
+                  activeDot={{ r: 5, fill: '#e8ff47' }}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -162,56 +141,68 @@ export default function Stats({ session }) {
 
           {/* GRAFICO VOLUME */}
           <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-            <div className="text-white font-bold mb-1">Volume totale</div>
-            <div className="text-[#666] text-xs mb-4">Kg × ripetizioni per sessione</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={volumeData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
-                <XAxis dataKey="date" tick={{ fill: '#666', fontSize: 10 }} />
-                <YAxis tick={{ fill: '#666', fontSize: 10 }} />
+            <div className="text-white font-bold text-sm mb-1">Volume per sessione</div>
+            <div className="text-[#666] text-xs mb-4">Tonnellate totali spostate (kg × rip)</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: '#666', fontSize: 10 }}
+                  axisLine={{ stroke: '#2a2a2a' }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: '#666', fontSize: 10 }}
+                  axisLine={{ stroke: '#2a2a2a' }}
+                  tickLine={false}
+                />
                 <Tooltip content={<CustomTooltip />} />
                 <Line
                   type="monotone"
                   dataKey="volume"
-                  stroke="#ff6b35"
+                  name="Volume"
+                  stroke="#60a5fa"
                   strokeWidth={2}
-                  dot={{ fill: '#ff6b35', r: 4 }}
-                  activeDot={{ r: 6 }}
+                  dot={{ fill: '#60a5fa', r: 3 }}
+                  activeDot={{ r: 5, fill: '#60a5fa' }}
                 />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
-          {/* RECORD PERSONALE */}
-          <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
-            <div className="text-white font-bold mb-3">Record personale</div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center">
-                <div className="text-[#e8ff47] font-black text-2xl">
-                  {Math.max(...progressData.map(d => d.maxKg))} kg
+          {/* RIEPILOGO NUMERICO */}
+          {chartData.length > 0 && (
+            <div className="bg-[#111] border border-[#2a2a2a] rounded-2xl p-4">
+              <div className="text-white font-bold text-sm mb-3">Riepilogo — {selectedEx}</div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center">
+                  <div className="text-[#e8ff47] font-black text-xl font-mono">
+                    {Math.max(...chartData.map(d => d.maxKg))} kg
+                  </div>
+                  <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Record</div>
                 </div>
-                <div className="text-[#666] text-xs mt-1">Peso max</div>
-              </div>
-              <div className="text-center">
-                <div className="text-[#ff6b35] font-black text-2xl">
-                  {Math.max(...progressData.map(d => d.volume))}
+                <div className="text-center">
+                  <div className="text-[#60a5fa] font-black text-xl font-mono">
+                    {chartData.length}
+                  </div>
+                  <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Sessioni</div>
                 </div>
-                <div className="text-[#666] text-xs mt-1">Vol. max</div>
-              </div>
-              <div className="text-center">
-                <div className="text-white font-black text-2xl">
-                  {progressData.length}
+                <div className="text-center">
+                  <div className="text-[#4ade80] font-black text-xl font-mono">
+                    {(() => {
+                      const first = chartData[0]?.maxKg || 0
+                      const last = chartData[chartData.length - 1]?.maxKg || 0
+                      const diff = last - first
+                      return (diff >= 0 ? '+' : '') + diff.toFixed(1) + ' kg'
+                    })()}
+                  </div>
+                  <div className="text-[#666] text-xs uppercase tracking-widest mt-1">Progresso</div>
                 </div>
-                <div className="text-[#666] text-xs mt-1">Sessioni</div>
               </div>
             </div>
-          </div>
-
-        </div>
-      ) : (
-        <div className="mt-6 p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
-          <p className="text-[#666] text-sm">Nessun dato per questo esercizio.</p>
-        </div>
+          )}
+        </>
       )}
     </div>
   )
