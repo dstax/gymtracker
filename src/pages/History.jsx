@@ -117,54 +117,26 @@ export default function History({ session }) {
     if (data) setCustomExercises(data)
   }
 
-  // FIX: prima prendi le sessioni dell'utente, poi i session_sets.
-  // Il filtro .eq() su tabella joinata non funziona in modo affidabile con RLS.
+  // USA LA FUNZIONE SQL get_user_pr — nessun limite, calcolo nel DB, RLS bypassato con SECURITY DEFINER
   async function fetchPRs() {
     setLoadingPRs(true)
-
-    // Step 1: prendi tutti gli id sessione dell'utente
-    const { data: userSessions, error: sessErr } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('user_id', session.user.id)
-      .not('ended_at', 'is', null)
-
-    if (sessErr || !userSessions || userSessions.length === 0) {
-      setPRData([])
-      setLoadingPRs(false)
-      return
-    }
-
-    const sessionIds = userSessions.map(s => s.id)
-
-    // Step 2: prendi tutti i session_sets di quelle sessioni
-    // Supabase gestisce bene .in() su colonne dirette (non join)
     const { data, error } = await supabase
-  .from('session_sets')
-  .select('exercise_name, kg, reps')
-  .in('session_id', sessionIds)
-  .limit(10000)
+      .rpc('get_user_pr', { p_user_id: session.user.id })
 
     if (error || !data) {
+      console.error('Errore fetchPRs:', error)
       setPRData([])
       setLoadingPRs(false)
       return
     }
 
-    // Calcola max kg e volume totale per esercizio
-    const exercises = {}
-    data.forEach(s => {
-      const name = s.exercise_name
-      const kg = parseFloat(s.kg) || 0
-      const reps = parseInt(s.reps) || 0
-      if (!exercises[name]) exercises[name] = { maxKg: 0, totalVolume: 0 }
-      if (kg > exercises[name].maxKg) exercises[name].maxKg = kg
-      exercises[name].totalVolume += kg * reps
-    })
-
     setPRData(
-      Object.entries(exercises)
-        .map(([name, stats]) => ({ name, maxKg: stats.maxKg, totalVolume: stats.totalVolume }))
+      data
+        .map(row => ({
+          name: row.exercise_name,
+          maxKg: parseFloat(row.max_kg) || 0,
+          totalVolume: parseFloat(row.total_volume) || 0
+        }))
         .sort((a, b) => a.name.localeCompare(b.name))
     )
     setLoadingPRs(false)
@@ -423,7 +395,12 @@ export default function History({ session }) {
       total_volume: newVolume
     }).eq('id', selected.id)
 
-    const updatedSession = { ...selected, workout_name: editName.trim(), duration_seconds: newDuration, total_volume: newVolume }
+    const updatedSession = {
+      ...selected,
+      workout_name: editName.trim(),
+      duration_seconds: newDuration,
+      total_volume: newVolume
+    }
     setSelected(updatedSession)
     setSessions(prev => prev.map(s => s.id === selected.id ? updatedSession : s))
     setEditMode(false)
@@ -446,7 +423,7 @@ export default function History({ session }) {
     text += `⏱ Durata: ${fmt(selected.duration_seconds)} | Volume: ${(selected.total_volume / 1000).toFixed(1)}t`
     if (hasPR) text += ` | 🏆 PR`
     text += `\n\n`
-    groupByExerciseOrdered(detail).forEach(({ name, sets }) => {
+    grouped.forEach(({ name, sets }) => {
       text += `*${name}*\n`
       sets.forEach((s, i) => {
         text += `  Serie ${i + 1}: ${s.reps} rip × ${s.kg} kg`
@@ -530,7 +507,9 @@ export default function History({ session }) {
       </div>
       <div className="text-[#666] text-xs uppercase tracking-widest mb-5">Personal best per esercizio</div>
 
-      {loadingPRs ? <div className="text-[#666] text-sm">Caricamento...</div> : prData.length === 0 ? (
+      {loadingPRs ? (
+        <div className="text-[#666] text-sm">Caricamento...</div>
+      ) : prData.length === 0 ? (
         <div className="p-4 bg-[#111] border border-[#2a2a2a] rounded-2xl">
           <p className="text-[#666] text-sm">Nessun dato ancora. Completa qualche sessione!</p>
         </div>
@@ -540,16 +519,22 @@ export default function History({ session }) {
             <div key={ex.name} className="p-3 bg-[#111] border border-[#2a2a2a] rounded-xl">
               <div className="text-white font-bold text-sm">{ex.name}</div>
               <div className="flex gap-4 mt-1.5">
-                {ex.maxKg > 0 && <div className="flex items-center gap-1.5">
-                  <span className="text-[#666] text-xs uppercase tracking-widest">PR</span>
-                  <span className="text-[#e8ff47] font-mono font-black text-sm">{ex.maxKg} kg</span>
-                </div>}
-                {ex.totalVolume > 0 && <div className="flex items-center gap-1.5">
-                  <span className="text-[#666] text-xs uppercase tracking-widest">Totale</span>
-                  <span className="text-[#60a5fa] font-mono font-bold text-sm">
-                    {ex.totalVolume >= 1000 ? (ex.totalVolume / 1000).toFixed(1) + 't' : ex.totalVolume + ' kg'}
-                  </span>
-                </div>}
+                {ex.maxKg > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[#666] text-xs uppercase tracking-widest">PR</span>
+                    <span className="text-[#e8ff47] font-mono font-black text-sm">{ex.maxKg} kg</span>
+                  </div>
+                )}
+                {ex.totalVolume > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[#666] text-xs uppercase tracking-widest">Totale</span>
+                    <span className="text-[#60a5fa] font-mono font-bold text-sm">
+                      {ex.totalVolume >= 1000
+                        ? (ex.totalVolume / 1000).toFixed(1) + 't'
+                        : ex.totalVolume + ' kg'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -814,10 +799,12 @@ export default function History({ session }) {
             ))}
           </div>
           <div className="mt-5 space-y-3">
-            <button onClick={saveEdit} disabled={saving} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
+            <button onClick={saveEdit} disabled={saving}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
               {saving ? 'Salvataggio...' : '✓ Salva modifiche'}
             </button>
-            <button onClick={() => setEditMode(false)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">Annulla</button>
+            <button onClick={() => setEditMode(false)}
+              className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">Annulla</button>
           </div>
         </div>
       ) : (
