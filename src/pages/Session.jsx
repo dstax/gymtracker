@@ -244,17 +244,13 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     }
   }
 
-  // FIX: usa la stessa RPC get_user_pr per coerenza e affidabilità
-  // Nessun limite di righe, nessun problema RLS, calcolo nel DB
   async function fetchHistoricalMaxKg() {
     const { data, error } = await supabase
       .rpc('get_user_pr', { p_user_id: userSession.user.id })
-
     if (error || !data) {
       console.error('Errore fetchHistoricalMaxKg:', error)
       return {}
     }
-
     const maxKg = {}
     data.forEach(row => {
       maxKg[row.exercise_name] = parseFloat(row.max_kg) || 0
@@ -280,18 +276,29 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
       const sortedSets = ex.sets?.sort((a, b) => a.position - b.position) || []
       const extras = extraSets[ex.id] || []
       const note = exerciseNotes[ex.id] || null
-      const allSets = [
-        ...sortedSets.map(s => ({
+
+      // SOLO serie base completate (marcate con spunta verde)
+      const completedBaseSets = sortedSets
+        .filter(s => completedSets[s.id])
+        .map(s => ({
           kg: parseFloat(setValues[s.id]?.kg) || 0,
           reps: parseInt(setValues[s.id]?.reps) || 0,
-        })),
-        ...extras.map(s => ({
+        }))
+
+      // SOLO serie extra completate
+      const completedExtraSets = extras
+        .filter(s => s.completed)
+        .map(s => ({
           kg: parseFloat(s.kg) || 0,
           reps: parseInt(s.reps) || 0,
         }))
-      ]
 
-      allSets.forEach((s, i) => {
+      const allCompletedSets = [...completedBaseSets, ...completedExtraSets]
+
+      // Se nessuna serie completata per questo esercizio, saltalo
+      if (allCompletedSets.length === 0) return
+
+      allCompletedSets.forEach((s, i) => {
         const { kg, reps } = s
         totalVolume += reps * kg
         const prevMax = Math.max(historicalMax[ex.name] || 0, sessionMax[ex.name] || 0)
