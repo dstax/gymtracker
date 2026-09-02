@@ -3,8 +3,34 @@ import { supabase } from '../lib/supabase'
 
 const STORAGE_KEY = (workoutId) => `gymtracker_session_${workoutId}`
 
+const DEFAULT_EXERCISES = [
+  { name: 'Abdominal Crunch', machine: 'Abdominal Crunch' },
+  { name: 'Arm Curl', machine: 'Arm Curl' },
+  { name: 'Arm Extension', machine: 'Arm Extension' },
+  { name: 'Chest Press', machine: 'Chest Press' },
+  { name: 'Curl con Barra EZ', machine: 'Barra EZ' },
+  { name: 'Curl con Manubri', machine: 'Bilancieri e Manubri' },
+  { name: 'Delts Machine', machine: 'Delts Machine' },
+  { name: 'Glute Press', machine: 'Glute Press' },
+  { name: 'Incline Chest Press', machine: 'Incline Chest Press' },
+  { name: 'Lat Machine', machine: 'Lat Machine' },
+  { name: 'Leg Curl (Seduto)', machine: 'Leg Curl (Seduto)' },
+  { name: 'Leg Extension', machine: 'Leg Extension' },
+  { name: 'Leg Press', machine: 'Leg Press' },
+  { name: 'Low Row', machine: 'Low Row' },
+  { name: 'Panca Piana', machine: 'Panca Piana (Bilanciere/Manubri)' },
+  { name: 'Pectoral Machine', machine: 'Pectoral Machine' },
+  { name: 'Plank', machine: 'Corpo libero' },
+  { name: 'Pulley', machine: 'Pulley' },
+  { name: 'Row Machine', machine: 'Row Machine' },
+  { name: 'Shoulder Press', machine: 'Shoulder Press' },
+  { name: 'Standing Leg Curl', machine: 'Standing Leg Curl' },
+  { name: 'Tricipiti ai Cavi', machine: 'Cavi' },
+]
+
 export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [exercises, setExercises] = useState([])
+  const [customExercises, setCustomExercises] = useState([])
   const [currentIdx, setCurrentIdx] = useState(0)
   const [completedSets, setCompletedSets] = useState({})
   const [setValues, setSetValues] = useState({})
@@ -19,11 +45,16 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
   const [showResumeModal, setShowResumeModal] = useState(false)
   const [showSetConfirm, setShowSetConfirm] = useState(null)
   const [savedData, setSavedData] = useState(null)
+  const [showAddExModal, setShowAddExModal] = useState(false)
+  const [addExSelected, setAddExSelected] = useState('')
+  const [addExSets, setAddExSets] = useState([{ kg: 0, reps: 10 }])
+  const [confirmRemoveEx, setConfirmRemoveEx] = useState(null) // indice esercizio da rimuovere
   const totalRef = useRef(null)
   const restRef = useRef(null)
 
   useEffect(() => {
     fetchExercises()
+    fetchCustomExercises()
     totalRef.current = setInterval(() => setTotalSeconds(s => s + 1), 1000)
     return () => {
       clearInterval(totalRef.current)
@@ -98,6 +129,15 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
     setLoading(false)
   }
 
+  async function fetchCustomExercises() {
+    const { data } = await supabase
+      .from('custom_exercises')
+      .select('*')
+      .eq('user_id', userSession.user.id)
+      .order('name')
+    if (data) setCustomExercises(data)
+  }
+
   function initDefaultValues(data) {
     const vals = {}
     const notes = {}
@@ -133,6 +173,83 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
   function clearStorage() {
     localStorage.removeItem(STORAGE_KEY(workout.id))
+  }
+
+  // Aggiunge esercizio solo in locale, senza toccare il DB
+  function confirmAddExercise() {
+    if (!addExSelected) return
+    const allEx = [...DEFAULT_EXERCISES, ...customExercises.map(e => ({ name: e.name, machine: e.machine || '' }))]
+    const found = allEx.find(e => e.name === addExSelected)
+    const tempId = `session_ex_${Date.now()}`
+    const newSets = addExSets.map((s, i) => ({
+      id: `session_set_${Date.now()}_${i}`,
+      reps: parseInt(s.reps) || 10,
+      kg: parseFloat(s.kg) || 0,
+      position: i
+    }))
+    const newEx = {
+      id: tempId,
+      name: addExSelected,
+      machine: found?.machine || '',
+      note: null,
+      sets: newSets,
+      isSessionOnly: true // flag: non appartiene alla scheda originale
+    }
+    // Inizializza setValues per le nuove serie
+    const newVals = {}
+    newSets.forEach(s => { newVals[s.id] = { kg: s.kg, reps: s.reps } })
+    setSetValues(prev => ({ ...prev, ...newVals }))
+    setExercises(prev => [...prev, newEx])
+    setShowAddExModal(false)
+    setAddExSelected('')
+    setAddExSets([{ kg: 0, reps: 10 }])
+    // Naviga all'esercizio appena aggiunto
+    setCurrentIdx(exercises.length)
+  }
+
+  // Rimuove esercizio solo dallo state locale
+  function removeExercise(idx) {
+    const ex = exercises[idx]
+    // Pulisci setValues per le serie di questo esercizio
+    const keysToRemove = (ex.sets || []).map(s => s.id)
+    setSetValues(prev => {
+      const u = { ...prev }
+      keysToRemove.forEach(k => delete u[k])
+      return u
+    })
+    // Pulisci completedSets
+    setCompletedSets(prev => {
+      const u = { ...prev }
+      keysToRemove.forEach(k => delete u[k])
+      return u
+    })
+    // Pulisci extraSets
+    setExtraSets(prev => {
+      const u = { ...prev }
+      delete u[ex.id]
+      return u
+    })
+    // Pulisci note
+    setExerciseNotes(prev => {
+      const u = { ...prev }
+      delete u[ex.id]
+      return u
+    })
+    setExercises(prev => prev.filter((_, i) => i !== idx))
+    // Aggiusta currentIdx se necessario
+    setCurrentIdx(prev => {
+      if (prev >= idx && prev > 0) return prev - 1
+      return prev
+    })
+    setConfirmRemoveEx(null)
+  }
+
+  function getAllExerciseNames() {
+    const custom = customExercises.map(e => e.name)
+    const currentNames = exercises.map(e => e.name)
+    return [...DEFAULT_EXERCISES.map(e => e.name), ...custom]
+      .filter(name => !currentNames.includes(name)) // escludi già presenti
+      .sort((a, b) => a.localeCompare(b))
   }
 
   function confirmAddSet() {
@@ -277,7 +394,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
       const extras = extraSets[ex.id] || []
       const note = exerciseNotes[ex.id] || null
 
-      // SOLO serie base completate (marcate con spunta verde)
+      // Solo serie base completate
       const completedBaseSets = sortedSets
         .filter(s => completedSets[s.id])
         .map(s => ({
@@ -285,7 +402,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
           reps: parseInt(setValues[s.id]?.reps) || 0,
         }))
 
-      // SOLO serie extra completate
+      // Solo serie extra completate
       const completedExtraSets = extras
         .filter(s => s.completed)
         .map(s => ({
@@ -294,8 +411,6 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
         }))
 
       const allCompletedSets = [...completedBaseSets, ...completedExtraSets]
-
-      // Se nessuna serie completata per questo esercizio, saltalo
       if (allCompletedSets.length === 0) return
 
       allCompletedSets.forEach((s, i) => {
@@ -306,7 +421,7 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
         if (kg > (sessionMax[ex.name] || 0)) sessionMax[ex.name] = kg
         sessionSetsToInsert.push({
           exercise_name: ex.name,
-          exercise_id: ex.id,
+          exercise_id: ex.isSessionOnly ? null : ex.id, // gli esercizi aggiunti in sessione non hanno id DB
           exercise_order: exerciseOrder,
           set_number: i + 1,
           reps, kg, note, is_pr: isPR,
@@ -407,12 +522,8 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
                   Verrà aggiunta una serie extra a <span className="text-white font-medium">{currentEx.name}</span>.
                 </div>
                 <div className="space-y-3">
-                  <button onClick={confirmAddSet} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm">
-                    ＋ Aggiungi serie
-                  </button>
-                  <button onClick={() => setShowSetConfirm(null)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
-                    Annulla
-                  </button>
+                  <button onClick={confirmAddSet} className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm">＋ Aggiungi serie</button>
+                  <button onClick={() => setShowSetConfirm(null)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">Annulla</button>
                 </div>
               </>
             ) : (
@@ -423,15 +534,107 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
                   Verrà rimossa l'ultima serie di <span className="text-white font-medium">{currentEx.name}</span>.
                 </div>
                 <div className="space-y-3">
-                  <button onClick={confirmRemoveSet} className="w-full bg-red-500/20 text-red-400 border border-red-500/30 font-bold py-3 rounded-xl text-sm">
-                    − Rimuovi serie
-                  </button>
-                  <button onClick={() => setShowSetConfirm(null)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
-                    Annulla
-                  </button>
+                  <button onClick={confirmRemoveSet} className="w-full bg-red-500/20 text-red-400 border border-red-500/30 font-bold py-3 rounded-xl text-sm">− Rimuovi serie</button>
+                  <button onClick={() => setShowSetConfirm(null)} className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">Annulla</button>
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CONFERMA RIMUOVI ESERCIZIO */}
+      {confirmRemoveEx !== null && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center px-5 backdrop-blur-sm">
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-3xl w-full max-w-[340px] p-6">
+            <div className="text-2xl mb-2">🗑</div>
+            <div className="text-white font-black text-lg mb-1">Rimuovere l'esercizio?</div>
+            <div className="text-[#666] text-sm mb-5">
+              <span className="text-white font-medium">{exercises[confirmRemoveEx]?.name}</span> verrà rimosso dalla sessione in corso. La scheda originale non viene modificata.
+            </div>
+            <div className="space-y-3">
+              <button onClick={() => removeExercise(confirmRemoveEx)}
+                className="w-full bg-red-500/20 text-red-400 border border-red-500/30 font-bold py-3 rounded-xl text-sm">
+                Rimuovi esercizio
+              </button>
+              <button onClick={() => setConfirmRemoveEx(null)}
+                className="w-full py-3 rounded-xl text-sm text-[#666] border border-[#2a2a2a]">
+                Annulla
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL AGGIUNGI ESERCIZIO IN SESSIONE */}
+      {showAddExModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end backdrop-blur-sm" onClick={() => setShowAddExModal(false)}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-t-3xl w-full max-w-[430px] mx-auto p-6 pb-10 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="w-9 h-1 bg-[#2a2a2a] rounded mx-auto mb-5"></div>
+            <div className="text-white font-black text-xl tracking-wide mb-1">AGGIUNGI ESERCIZIO</div>
+            <div className="text-[#666] text-xs mb-4">Solo per questa sessione — la scheda non viene modificata.</div>
+
+            <label className="text-[#666] text-xs uppercase tracking-widest block mb-2">Esercizio</label>
+            <select
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#e8ff47] transition-colors mb-4"
+              value={addExSelected}
+              onChange={e => setAddExSelected(e.target.value)}
+            >
+              <option value="">— Seleziona dalla libreria —</option>
+              {getAllExerciseNames().map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+
+            <div className="text-[#666] text-xs uppercase tracking-widest mb-2">Serie</div>
+            <table className="w-full mb-3">
+              <thead>
+                <tr>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center w-8">Set</th>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Kg</th>
+                  <th className="text-[#666] text-xs uppercase tracking-widest pb-2 text-center">Rip</th>
+                  <th className="w-7"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {addExSets.map((s, i) => (
+                  <tr key={i} className="border-t border-[#1a1a1a]">
+                    <td className="py-2 text-center text-[#444] font-mono text-sm">{i + 1}</td>
+                    <td className="py-2 text-center">
+                      <input
+                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-[#e8ff47] font-mono font-bold text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                        type="number" step="2.5" min="0" value={s.kg}
+                        onChange={e => setAddExSets(prev => prev.map((x, j) => j === i ? { ...x, kg: e.target.value } : x))} />
+                    </td>
+                    <td className="py-2 text-center">
+                      <input
+                        className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg text-white font-mono text-sm text-center w-16 py-1.5 outline-none focus:border-[#e8ff47]"
+                        type="number" min="1" value={s.reps}
+                        onChange={e => setAddExSets(prev => prev.map((x, j) => j === i ? { ...x, reps: e.target.value } : x))} />
+                    </td>
+                    <td className="py-2 text-center">
+                      <button
+                        onClick={() => setAddExSets(prev => prev.filter((_, j) => j !== i))}
+                        disabled={addExSets.length <= 1}
+                        className="w-6 h-6 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center mx-auto disabled:opacity-20">✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <button
+              onClick={() => setAddExSets(prev => { const last = prev[prev.length - 1]; return [...prev, { kg: last?.kg ?? 0, reps: last?.reps ?? 10 }] })}
+              className="w-full py-2 rounded-xl text-xs text-[#e8ff47] border border-[#e8ff47]/20 bg-[#e8ff47]/5 mb-5">
+              ＋ Aggiungi serie
+            </button>
+
+            <button
+              onClick={confirmAddExercise}
+              disabled={!addExSelected}
+              className="w-full bg-[#e8ff47] text-black font-bold py-3 rounded-xl text-sm disabled:opacity-50">
+              ＋ Aggiungi alla sessione
+            </button>
           </div>
         </div>
       )}
@@ -445,6 +648,11 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
           </div>
           <div className="flex items-center gap-2">
             <div className="text-[#666] text-xs">{completedCount}/{exercises.length} esercizi</div>
+            <button
+              onClick={() => { setShowAddExModal(true); setAddExSelected(''); setAddExSets([{ kg: 0, reps: 10 }]) }}
+              className="w-8 h-8 rounded-lg border border-[#e8ff47]/30 bg-[#e8ff47]/10 text-[#e8ff47] text-sm flex items-center justify-center"
+              title="Aggiungi esercizio"
+            >＋</button>
             <button
               onClick={() => setShowExerciseList(true)}
               className="w-8 h-8 rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] text-sm flex items-center justify-center"
@@ -471,9 +679,19 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
 
       {/* ESERCIZIO */}
       <div className="px-5 pt-4 pb-2">
-        <div className="flex items-center gap-2">
-          <div className="text-white font-black text-xl">{currentEx.name}</div>
-          {isExerciseCompleted(currentEx) && <span className="text-green-400 text-sm">✓</span>}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="text-white font-black text-xl">{currentEx.name}</div>
+            {isExerciseCompleted(currentEx) && <span className="text-green-400 text-sm">✓</span>}
+            {currentEx.isSessionOnly && (
+              <span className="text-xs bg-[#e8ff47]/10 border border-[#e8ff47]/30 text-[#e8ff47] rounded-lg px-2 py-0.5">solo sessione</span>
+            )}
+          </div>
+          <button
+            onClick={() => setConfirmRemoveEx(currentIdx)}
+            className="w-7 h-7 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 text-xs flex items-center justify-center"
+            title="Rimuovi esercizio dalla sessione"
+          >🗑</button>
         </div>
         <div className="text-[#666] text-xs mt-1">{totalSetsCount} serie</div>
         {currentEx.machine && (
@@ -648,12 +866,17 @@ export default function Session({ workout, userSession, onEnd, scheduledId }) {
                       {ex.name}
                     </div>
                     {ex.machine && <div className="text-[#444] text-xs mt-0.5">{ex.machine}</div>}
+                    {ex.isSessionOnly && <div className="text-[#e8ff47] text-xs mt-0.5">solo sessione</div>}
                   </div>
                   {i === currentIdx && <span className="text-[#e8ff47] text-xs">← qui</span>}
                   {exerciseNotes[ex.id] && <span className="text-[#666] text-xs">📝</span>}
                 </button>
               ))}
             </div>
+            <button
+              onClick={() => { setShowAddExModal(true); setShowExerciseList(false); setAddExSelected(''); setAddExSets([{ kg: 0, reps: 10 }]) }}
+              className="w-full mt-4 py-2.5 rounded-xl text-sm font-bold text-[#e8ff47] border border-[#e8ff47]/30 bg-[#e8ff47]/5"
+            >＋ Aggiungi esercizio</button>
           </div>
         </div>
       )}
